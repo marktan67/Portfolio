@@ -1,0 +1,2784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Advanced RPG</title>
+</head>
+<body>
+<script>
+(function launchAdvancedRPG() {
+
+    // ==========================================
+    // 1. ENGINE CONFIGURATION AND GLOBAL STATE
+    // ==========================================
+    let hero = {
+        name: "Hero", race: "", classId: "", className: "", sprite: "⚔️",
+        level: 1, xp: 0, nextXp: 20, gold: 40,
+        hp: 20, maxHp: 20, mp: 10, maxMp: 10, stamina: 100, maxStamina: 100,
+        stats: { str: 10, dex: 10, int: 10, sta: 10, cha: 10 },
+        luck: 10,
+        tempGoldBoostTurns: 0,
+        injury: null,
+        bestiary: {},
+        gearAffixes: { weapon: null, helmet: null, armor: null, gloves: null, pants: null, legs: null },
+        spells: [], inventory: ["potion_hp"],
+        shieldTurns: 0, shieldReduction: 0,
+        burnTurns: 0, burnDamage: 0,
+        weapon: { type: 'sword', level: 1 },
+        armorSlots: { helmet: 1, armor: 1, gloves: 1, pants: 1, legs: 1 },
+        pulverizeCooldown: 0,
+        strMilestonesSeen: [],
+        magic: {
+            multiMissile: false,
+            ignite: false,
+            upgradeChoice: null,   // 'missile' | 'ignite'
+            capstone: null,        // 'shield' | 'polymorph' | 'ampdamage'
+            milestonesSeen: []
+        },
+        runes: []
+    };
+
+    let enemy = {
+        name: "", hp: 0, maxHp: 0, sprite: "", xpReward: 0, goldReward: 0, baseDmg: 2, dieSides: 6,
+        burn: null, polymorphTurns: 0, origSprite: null, origName: null
+    };
+    let isEnemyTurn = false;
+    let currentEnv = "town"; // "town", "grasslands", "crypt", "volcanic", "dungeon"
+    let dungeonRun = null;
+    let arenaRun = null;
+    let hiddenDungeonUnlocked = false;
+    let travelJourney = null;
+    let forcedEncounter = null;
+    let guild = { registered: false, xp: 0, rankIndex: 0, activeQuestId: null, completedQuestIds: [] };
+
+    const RACES = {
+        Human: { sprite: "🧍", bonus: "Balanced (+1 to All Stats)" },
+        Elf: { sprite: "🧝", bonus: "Arcane Heritage (+2 INT, +1 DEX)" },
+        Dwarf: { sprite: "🧔", bonus: "Stout Frame (+2 STA, +1 STR)" },
+        Beastmen: { sprite: "🐺", bonus: "Feral Might (+2 STR, +1 CHA)" }
+    };
+
+    const CLASSES = {
+        swordsman: { name: "Swordsman", icon: "🗡️", baseHp: 25, baseMp: 0, spell: null, weapon: "sword", dieSides: 8, desc: "Master of raw physical steel." },
+        archer: { name: "Archer", icon: "🏹", baseHp: 20, baseMp: 0, spell: null, weapon: "bow", dieSides: 6, desc: "Precise marksman — deadly critical strikes scale with DEX." },
+        mage: { name: "Mage", icon: "🪄", baseHp: 14, baseMp: 20, spell: "Magic Missile", weapon: "staff", dieSides: 4, desc: "Weaver of primordial kinetic energies." }
+    };
+
+    const MONSTERS = {
+        grasslands: [
+            { name: "Wild Boar", hp: 16, xp: 10, gold: 8, dmg: 2, die: 4, sprite: "🐗" },
+            { name: "Goblin Scout", hp: 20, xp: 14, gold: 12, dmg: 2, die: 6, sprite: "👺" },
+            { name: "Wolf", hp: 18, xp: 12, gold: 10, dmg: 2, die: 5, sprite: "🐺" },
+            { name: "Bear", hp: 30, xp: 20, gold: 16, dmg: 3, die: 6, sprite: "🐻" },
+            { name: "Goblin Brute", hp: 26, xp: 18, gold: 15, dmg: 3, die: 6, sprite: "🧌" },
+            { name: "Slime", hp: 12, xp: 8, gold: 6, dmg: 1, die: 3, sprite: "🟢" },
+            { name: "Giant Spider", hp: 20, xp: 15, gold: 13, dmg: 2, die: 6, sprite: "🕷️" },
+            { name: "Bandit", hp: 22, xp: 16, gold: 20, dmg: 3, die: 5, sprite: "🥷" }
+        ],
+        crypt: [
+            { name: "Restless Skeleton", hp: 26, xp: 22, gold: 18, dmg: 3, die: 6, sprite: "💀" },
+            { name: "Wraith", hp: 32, xp: 30, gold: 26, dmg: 4, die: 6, sprite: "👻" },
+            { name: "Skeleton Mage", hp: 34, xp: 34, gold: 30, dmg: 4, die: 6, sprite: "🧙" },
+            { name: "Mummy", hp: 38, xp: 36, gold: 32, dmg: 4, die: 7, sprite: "🧟" },
+            { name: "Vampire", hp: 42, xp: 44, gold: 40, dmg: 5, die: 6, sprite: "🧛" },
+            { name: "Death Knight", hp: 48, xp: 52, gold: 46, dmg: 5, die: 8, sprite: "🗡️" },
+            { name: "Lich", hp: 58, xp: 68, gold: 62, dmg: 6, die: 8, sprite: "☠️" }
+        ],
+        volcanic: [
+            { name: "Ash Imp", hp: 30, xp: 24, gold: 20, dmg: 4, die: 6, sprite: "😈" },
+            { name: "Lava Hound", hp: 36, xp: 30, gold: 24, dmg: 4, die: 7, sprite: "🐕" },
+            { name: "Cinder Elemental", hp: 42, xp: 36, gold: 30, dmg: 5, die: 7, sprite: "🔥" },
+            { name: "Magma Slime", hp: 40, xp: 34, gold: 28, dmg: 4, die: 6, sprite: "🟠" },
+            { name: "Basalt Golem", hp: 54, xp: 44, gold: 38, dmg: 6, die: 8, sprite: "🗿" },
+            { name: "Scorched Harpy", hp: 48, xp: 40, gold: 34, dmg: 5, die: 7, sprite: "🪽" },
+            { name: "Flame Serpent", hp: 60, xp: 50, gold: 42, dmg: 6, die: 8, sprite: "🐍" },
+            { name: "Ember Raider", hp: 66, xp: 56, gold: 48, dmg: 6, die: 8, sprite: "🥷" },
+            { name: "Molten Beast", hp: 78, xp: 68, gold: 58, dmg: 7, die: 9, sprite: "🐗" },
+            { name: "Infernal Drake", hp: 90, xp: 82, gold: 70, dmg: 8, die: 10, sprite: "🐲" }
+        ]
+    };
+
+const DUNGEON_STAGES = [
+        { name: "Ashbound Grunt", hp: 42, xp: 34, gold: 28, dmg: 4, die: 6, sprite: "👹", scale: 1.0 },
+        { name: "Searing Sentinel", hp: 58, xp: 46, gold: 38, dmg: 5, die: 7, sprite: "🛡️", scale: 1.35 },
+        { name: "Lava Executioner", hp: 78, xp: 64, gold: 54, dmg: 6, die: 8, sprite: "⚔️", scale: 1.7 },
+        { name: "Inferno Warden", hp: 108, xp: 92, gold: 78, dmg: 8, die: 10, sprite: "👑", scale: 2.25, boss: true }
+    ];
+
+    // Injecting Advanced Graphic CSS Rules
+    document.body.innerHTML = `
+        <style>
+            /* Fluid Liquid Resource Gauges */
+            .glow-bar-bg { width: 100%; background: rgba(20,20,20,0.8); height: 18px; border-radius: 9px; padding: 2px; box-sizing: border-box; border: 1px solid #444; overflow: hidden; position: relative; }
+            .glow-bar-fill { height: 100%; border-radius: 6px; position: relative; overflow: hidden; transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+            .glow-bar-fill::after {
+                content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+                background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 100%);
+                animation: liquidFlow 1.8s infinite linear; transform: translateX(-100%);
+            }
+            @keyframes liquidFlow { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+            /* Action Animations */
+            @keyframes strikeRight { 0% { transform: translateX(0); } 40% { transform: translateX(50px) scale(1.15); } 100% { transform: translateX(0); } }
+            @keyframes strikeLeft { 0% { transform: translateX(0); } 40% { transform: translateX(-50px) scale(1.15); } 100% { transform: translateX(0); } }
+            @keyframes shake { 0%, 100% { transform: translate(0, 0); } 20%, 60% { transform: translate(-5px, 2px); } 40%, 80% { transform: translate(5px, -2px); } }
+            .anim-p-strike { animation: strikeRight 0.3s ease-in-out; }
+            .anim-e-strike { animation: strikeLeft 0.3s ease-in-out; }
+            .anim-shake { animation: shake 0.25s ease-in-out; }
+
+            /* Spell Projectile Animation */
+            @keyframes projectileFly {
+                0% { left: 20%; opacity: 1; transform: translateY(0) scale(1); }
+                80% { opacity: 1; }
+                100% { left: 74%; opacity: 0.15; transform: translateY(-6px) scale(1.4); }
+            }
+            .spell-projectile {
+                position: absolute; top: 42%; font-size: 2.1rem; z-index: 20;
+                animation: projectileFly 0.45s ease-in forwards;
+                filter: drop-shadow(0 0 8px rgba(255,255,255,0.6));
+                pointer-events: none;
+            }
+
+            /* Environment Themes + Decorative Layers */
+            .env-town { background: linear-gradient(180deg, #4b3721 0%, #1a120d 100%); position: relative; overflow: hidden; }
+            .env-town::before {
+                content: "🏚️ 🛖 🏚️ 🛖 🏚️ 🛖 🏚️ 🛖 🏚️ 🛖";
+                position: absolute; top: 6%; left: -5%; width: 110%; font-size: 2.6rem; letter-spacing: 22px;
+                opacity: 0.25; filter: blur(1px) brightness(0.7); white-space: nowrap; pointer-events: none;
+            }
+            .env-town::after {
+                content: "🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥";
+                position: absolute; bottom: 4%; left: -5%; width: 110%; font-size: 1.6rem; letter-spacing: 60px;
+                opacity: 0.4; white-space: nowrap; pointer-events: none;
+            }
+
+            .env-grasslands { background: linear-gradient(180deg, #2f5c2f 0%, #102213 100%); position: relative; overflow: hidden; }
+            .env-grasslands::before {
+                content: "🌲 🌳 🌲 🌳 🌲 🌳 🌲 🌳 🌲 🌳 🌲 🌳 🌲 🌳";
+                position: absolute; top: 4%; left: -5%; width: 110%; font-size: 3.2rem; letter-spacing: 18px;
+                opacity: 0.35; filter: blur(1px) brightness(0.55); white-space: nowrap; pointer-events: none;
+            }
+            .env-grasslands::after {
+                content: "🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾 🌾";
+                position: absolute; bottom: 0; left: -5%; width: 110%; font-size: 2rem; letter-spacing: 12px;
+                opacity: 0.55; white-space: nowrap; pointer-events: none;
+            }
+
+            .env-crypt { background: linear-gradient(180deg, #2d233f 0%, #09060d 100%); position: relative; overflow: hidden; }
+            .env-crypt::before {
+                content: "🪦 ⛓️ 🪦 🕯️ 🪦 ⛓️ 🪦 🕯️ 🪦 ⛓️ 🪦";
+                position: absolute; top: 8%; left: -5%; width: 110%; font-size: 2.4rem; letter-spacing: 24px;
+                opacity: 0.3; filter: blur(1px) brightness(0.6); white-space: nowrap; pointer-events: none;
+            }
+            .env-crypt::after {
+                content: "";
+                position: absolute; inset: 0; background: radial-gradient(circle at 50% 80%, rgba(120,100,160,0.15), transparent 60%);
+                pointer-events: none;
+            }
+
+            .env-volcanic { background: linear-gradient(180deg, #6e220d 0%, #140605 100%); position: relative; overflow: hidden; }
+            .env-volcanic::before {
+                content: "🌋 🔥 🌋 🔥 🌋 🔥 🌋 🔥 🌋 🔥";
+                position: absolute; top: 6%; left: -5%; width: 110%; font-size: 2.8rem; letter-spacing: 22px;
+                opacity: 0.35; filter: blur(1px) brightness(0.7); white-space: nowrap; pointer-events: none;
+            }
+            .env-volcanic::after {
+                content: "🪨 🔥 🪨 🔥 🪨 🔥 🪨 🔥 🪨 🔥";
+                position: absolute; bottom: 2%; left: -5%; width: 110%; font-size: 2rem; letter-spacing: 18px;
+                opacity: 0.5; white-space: nowrap; pointer-events: none;
+            }
+
+            .env-dungeon { background: linear-gradient(180deg, #2f201b 0%, #080505 100%); position: relative; overflow: hidden; }
+            .env-dungeon::before {
+                content: "🗝️ ⛓️ 🗝️ ⛓️ 🗝️ ⛓️ 🗝️ ⛓️";
+                position: absolute; top: 8%; left: -5%; width: 110%; font-size: 2.4rem; letter-spacing: 26px;
+                opacity: 0.3; filter: blur(1px) brightness(0.65); white-space: nowrap; pointer-events: none;
+            }
+            .env-dungeon::after {
+                content: "🕸️ 🕯️ 🕸️ 🕯️ 🕸️ 🕯️ 🕸️ 🕯️";
+                position: absolute; bottom: 5%; left: -5%; width: 110%; font-size: 1.8rem; letter-spacing: 28px;
+                opacity: 0.35; white-space: nowrap; pointer-events: none;
+            }
+            .env-arena { background: linear-gradient(180deg, #24123b 0%, #09050f 100%); position: relative; overflow: hidden; }
+            .env-arena::before {
+                content: "⚔️ 🛡️ ⚔️ 🛡️ ⚔️ 🛡️ ⚔️";
+                position: absolute; top: 6%; left: -5%; width: 110%; font-size: 2.4rem; letter-spacing: 24px; opacity: 0.22; white-space: nowrap; pointer-events: none;
+            }
+            .env-arena::after {
+                content: "";
+                position: absolute; inset: 0; background: radial-gradient(circle at 50% 85%, rgba(160,120,255,0.18), transparent 62%); pointer-events: none;
+            }
+
+            /* Boss Encounter Styling */
+            .boss-sprite { filter: drop-shadow(0 0 16px #f1c40f) drop-shadow(0 0 4px #f1c40f); animation: bossPulse 1.6s infinite ease-in-out; }
+            @keyframes bossPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+            .boss-platform { box-shadow: 0 0 18px 4px rgba(241,196,15,0.5), 0 6px 12px rgba(0,0,0,0.5) !important; border-color: #f1c40f !important; }
+
+            /* UI Elements Styling */
+            .rpg-panel { background: linear-gradient(180deg, rgba(10, 22, 52, 0.9), rgba(5, 10, 28, 0.84)); border: 1px solid rgba(145, 180, 255, 0.2); border-radius: 14px; box-shadow: 0 10px 28px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.04); backdrop-filter: blur(10px); position: relative; z-index: 2; }
+            .rpg-btn { font-family: 'Georgia', serif; padding: 10px 18px; font-size: 0.95rem; color: #eef4ff; border: 1px solid rgba(160,185,255,0.24); border-radius: 8px; cursor: pointer; font-weight: bold; transition: all 0.2s; background: linear-gradient(180deg, #5c6fc8, #293869); box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+            .rpg-btn:hover:not(:disabled) { border-color: #9fd3ff; box-shadow: 0 0 10px rgba(127,173,255,0.35); }
+            .rpg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+            .stat-dot { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem; border-radius: 50%; border: 1px solid rgba(160,185,255,0.2); cursor: pointer; background: rgba(15, 28, 60, 0.9); color: #e9f1ff; user-select: none; }
+
+            /* Isekai-style summoning panel */
+            .isekai-panel {
+                background: linear-gradient(180deg, rgba(9, 18, 48, 0.92), rgba(4, 9, 24, 0.84));
+                border: 1px solid rgba(130, 170, 255, 0.24);
+                border-radius: 22px;
+                box-shadow: 0 30px 80px rgba(0,0,0,0.62), inset 0 0 0 1px rgba(255,255,255,0.05);
+                backdrop-filter: blur(14px) saturate(130%);
+                position: relative;
+                overflow: hidden;
+            }
+            .isekai-panel::before {
+                content: "";
+                position: absolute;
+                inset: -2px;
+                background:
+                    radial-gradient(circle at 18% 10%, rgba(111, 160, 255, 0.20), transparent 28%),
+                    radial-gradient(circle at 82% 18%, rgba(97, 124, 255, 0.16), transparent 24%),
+                    radial-gradient(circle at 65% 88%, rgba(170, 120, 255, 0.10), transparent 28%);
+                pointer-events: none;
+            }
+            .isekai-panel::after {
+                content: "✦ ✧ ✦";
+                position: absolute;
+                top: 16px;
+                right: 18px;
+                color: rgba(205, 220, 255, 0.35);
+                letter-spacing: 10px;
+                font-size: 1.2rem;
+                pointer-events: none;
+            }
+            .isekai-grid { display: flex; gap: 20px; text-align: left; margin-bottom: 25px; position: relative; z-index: 1; }
+            .isekai-box {
+                flex: 1;
+                background: rgba(11, 18, 42, 0.46);
+                padding: 14px;
+                border-radius: 16px;
+                border: 1px solid rgba(125, 166, 255, 0.16);
+                box-shadow: inset 0 0 28px rgba(0,0,0,0.2);
+            }
+            .isekai-tag {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 7px 12px;
+                border-radius: 999px;
+                background: rgba(42, 63, 120, 0.36);
+                border: 1px solid rgba(130, 170, 255, 0.18);
+                color: #d7e6ff;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                font-size: 0.76rem;
+                margin-bottom: 10px;
+            }
+            .isekai-label { font-weight: bold; color: #cfe0ff; }
+            .isekai-select {
+                width: 100%;
+                padding: 10px 12px;
+                background: rgba(7, 12, 28, 0.92);
+                color: #f4f7ff;
+                border: 1px solid rgba(120, 160, 255, 0.26);
+                border-radius: 10px;
+                margin-top: 4px;
+                box-shadow: inset 0 0 20px rgba(0,0,0,0.25);
+            }
+            .isekai-text { color: #9fb3d7; font-size: 0.86rem; line-height: 1.4; }
+            .sprite-img { image-rendering: auto; }
+        </style>
+        
+        <div id="game-viewport" class="env-town" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; color: #e5e5e5; font-family: 'Georgia', serif; display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; padding: 20px; z-index: 999999; overflow: hidden;"></div>
+    `;
+    const view = document.getElementById("game-viewport");
+
+    // ==========================================
+    // HELPERS
+    // ==========================================
+    function getPlatformStyle(env) {
+        if (env === "grasslands") return { bg: "linear-gradient(180deg, #6b8e3d, #2f4a1a)", border: "#8fae52" };
+        if (env === "crypt") return { bg: "linear-gradient(180deg, #4a4458, #221e2c)", border: "#5c5368" };
+        if (env === "volcanic") return { bg: "linear-gradient(180deg, #7a2d15, #35110b)", border: "#b8582d" };
+        if (env === "dungeon") return { bg: "linear-gradient(180deg, #584238, #271915)", border: "#8b6a58" };
+        if (env === "arena") return { bg: "linear-gradient(180deg, #5d3a7a, #25102f)", border: "#9b59b6" };
+        return { bg: "linear-gradient(180deg, #7f8c8d, #34495e)", border: "#95a5a6" };
+    }
+
+    const BOSS_CHANCE_BY_ENV = {
+        grasslands: 0,
+        crypt: 0.16,
+        volcanic: 0.20
+    };
+
+    const RUNE_DEFS = {
+        strength: { name: "Rune of Strength" },
+        haste: { name: "Rune of Haste" },
+        intelligence: { name: "Rune of Intelligence" },
+        charm: { name: "Rune of Charm" },
+        mana: { name: "Rune of Mana" },
+        health: { name: "Rune of Health" },
+        experience: { name: "Rune of Experience" },
+        flow: { name: "Rune of Flow" },
+        warding: { name: "Rune of Warding" },
+        fury: { name: "Rune of Fury" }
+    };
+
+    const GUILD_RANKS = ["F", "E", "D", "C", "B", "A", "S", "SS", "SSS"];
+    const GUILD_RANK_XP = [0, 80, 190, 340, 540, 790, 1090, 1450, 1880];
+    const ARMOR_SLOT_DATA = {
+        helmet: { label: "Helmet", icon: "🪖", weight: 1.0 },
+        armor: { label: "Armor", icon: "🥋", weight: 1.8 },
+        gloves: { label: "Gloves", icon: "🧤", weight: 0.8 },
+        pants: { label: "Pants", icon: "👖", weight: 1.0 },
+        legs: { label: "Legs", icon: "🦵", weight: 1.1 }
+    };
+    const QUEST_BOSS_LIBRARY = {
+        "Bandit Captain": { name: "Bandit Captain", env: "grasslands", sprite: "🥷", hp: 84, xp: 72, gold: 64, dmg: 7, die: 8, skills: ["slash", "command"] },
+        "Goblin Warcaller": { name: "Goblin Warcaller", env: "grasslands", sprite: "👺", hp: 96, xp: 86, gold: 70, dmg: 7, die: 8, skills: ["slash", "command", "ambush"] },
+        "Wraith Marshal": { name: "Wraith Marshal", env: "crypt", sprite: "👻", hp: 112, xp: 102, gold: 88, dmg: 8, die: 9, skills: ["drain", "curse"] },
+        "Bone Knight": { name: "Bone Knight", env: "crypt", sprite: "💀", hp: 122, xp: 112, gold: 96, dmg: 9, die: 10, skills: ["sunder", "drain"] },
+        "Blood Baron": { name: "Blood Baron", env: "crypt", sprite: "🧛", hp: 138, xp: 128, gold: 116, dmg: 10, die: 10, skills: ["drain", "siphon", "curse"] },
+        "Cinder Archon": { name: "Cinder Archon", env: "volcanic", sprite: "🔥", hp: 144, xp: 132, gold: 120, dmg: 10, die: 10, skills: ["magmaBurst", "emberNova"] },
+        "Basalt Colossus": { name: "Basalt Colossus", env: "volcanic", sprite: "🗿", hp: 168, xp: 152, gold: 136, dmg: 11, die: 11, skills: ["quake", "sunder"] },
+        "Magma Golem": { name: "Magma Golem", env: "volcanic", sprite: "🪨", hp: 210, xp: 188, gold: 164, dmg: 13, die: 12, skills: ["magmaBurst", "lavaWave", "quake"] },
+        "Infernal Sovereign": { name: "Infernal Sovereign", env: "volcanic", sprite: "🐲", hp: 280, xp: 250, gold: 220, dmg: 16, die: 14, skills: ["infernoCrown", "lavaWave", "soulRend"] }
+    };
+    const QUEST_DEFS = [
+        { id: "guild-f", rankIndex: 0, title: "Bandit Captain Hunt", env: "grasslands", targetBoss: "Bandit Captain", bossChance: 0.18, guildXp: 28, heroXp: 40, gold: 60, description: "Hunt the Bandit Captain lurking in the grasslands." },
+        { id: "guild-e", rankIndex: 1, title: "Warcaller Pursuit", env: "grasslands", targetBoss: "Goblin Warcaller", bossChance: 0.14, guildXp: 42, heroXp: 60, gold: 78, description: "Track the Goblin Warcaller through the fields." },
+        { id: "guild-d", rankIndex: 2, title: "Wraith Marshal Exorcism", env: "crypt", targetBoss: "Wraith Marshal", bossChance: 0.12, guildXp: 62, heroXp: 82, gold: 104, description: "Enter the crypt and banish the Wraith Marshal." },
+        { id: "guild-c", rankIndex: 3, title: "Bone Knight Duel", env: "crypt", targetBoss: "Bone Knight", bossChance: 0.10, guildXp: 88, heroXp: 112, gold: 130, description: "Challenge the Bone Knight in the deeper crypt halls." },
+        { id: "guild-b", rankIndex: 4, title: "Blood Baron Contract", env: "crypt", targetBoss: "Blood Baron", bossChance: 0.08, guildXp: 116, heroXp: 148, gold: 160, description: "Hunt the Blood Baron before nightfall." },
+        { id: "guild-a", rankIndex: 5, title: "Cinder Archon Pursuit", env: "volcanic", targetBoss: "Cinder Archon", bossChance: 0.07, guildXp: 154, heroXp: 190, gold: 200, description: "Track the Cinder Archon across the Molten Peaks." },
+        { id: "guild-s", rankIndex: 6, title: "Basalt Colossus Hunt", env: "volcanic", targetBoss: "Basalt Colossus", bossChance: 0.06, guildXp: 196, heroXp: 236, gold: 246, description: "Bring down the Basalt Colossus." },
+        { id: "guild-ss", rankIndex: 7, title: "Magma Golem Hunt", env: "volcanic", targetBoss: "Magma Golem", bossChance: 0.05, guildXp: 248, heroXp: 300, gold: 308, description: "The SS contract: hunt the Magma Golem in the volcanic wastes." },
+        { id: "guild-sss", rankIndex: 8, title: "Infernal Sovereign Hunt", env: "volcanic", targetBoss: "Infernal Sovereign", bossChance: 0.03, guildXp: 320, heroXp: 380, gold: 400, description: "The final contract: slay the Infernal Sovereign." }
+    ];
+    const GUILD_XP_THRESHOLDS = GUILD_RANK_XP;
+
+    function getBossChanceForEnv(env) {
+        return Object.prototype.hasOwnProperty.call(BOSS_CHANCE_BY_ENV, env) ? BOSS_CHANCE_BY_ENV[env] : 0;
+    }
+
+    function getMagicDamageMultiplier() {
+
+        return (hero.magic && hero.magic.capstone === 'ampdamage') ? 2 : 1;
+    }
+
+
+    function getRuneOffenseMultiplier() {
+        return hero.runes.includes("fury") ? 1.1 : 1;
+    }
+
+    function getRuneDefenseReduction() {
+        return hero.runes.includes("warding") ? 0.10 : 0;
+    }
+
+    function getRuneManaRegenAmount() {
+        return hero.runes.includes("flow") ? Math.max(1, Math.floor(hero.maxMp * 0.10)) : 0;
+    }
+
+    function getExpBonusMultiplier() {
+        return hero.runes.includes("experience") ? 1.10 : 1;
+    }
+
+    function runeDisplayText() {
+        if (!hero.runes || hero.runes.length === 0) return "None";
+        return hero.runes.map(id => RUNE_DEFS[id]?.name || id).join(", ");
+    }
+
+    function applyRuneReward(runeId) {
+        if (hero.runes.includes(runeId)) return false;
+        hero.runes.push(runeId);
+
+        if (runeId === "strength") hero.stats.str += 10;
+        if (runeId === "haste") hero.stats.dex += 10;
+        if (runeId === "intelligence") hero.stats.int += 10;
+        if (runeId === "charm") hero.stats.cha += 10;
+        if (runeId === "mana") { hero.maxMp += 30; hero.mp += 30; }
+        if (runeId === "health") { hero.maxHp += 30; hero.hp += 30; }
+
+        hero.hp = Math.min(hero.hp, hero.maxHp);
+        hero.mp = Math.min(hero.mp, hero.maxMp);
+        return true;
+    }
+
+    function awardRandomRuneFromChest() {
+        if (Math.random() >= getRuneChestSuccessChance()) return null;
+        const pool = Object.keys(RUNE_DEFS).filter(id => !hero.runes.includes(id));
+        if (pool.length === 0) return null;
+        const runeId = pool[Math.floor(Math.random() * pool.length)];
+        applyRuneReward(runeId);
+        return runeId;
+    }
+
+    // --- STR Skill Tree ---
+    function getStrDmgBonusMultiplier() { return hero.stats.str >= 25 ? 1.05 : 1; }
+    function getStrDamageReduction() { return hero.stats.str >= 75 ? 0.20 : 0; }
+    function isPulverizeUnlocked() { return hero.stats.str >= 50; }
+    function getPulverizeMultiplier() { return hero.stats.str >= 100 ? 3 : 2; }
+
+    // --- Class-specific combat math ---
+    function getCritChance() {
+        const luckBonus = Math.min(6, Math.floor((getLuckScore() - 10) / 3));
+        if (hero.classId === 'archer') return 5 + getEffectiveStat('dex') * 1.0 + getWeaponAffixCritBonus() + luckBonus;
+        return 5 + getEffectiveStat('dex') * 0.5 + getWeaponAffixCritBonus() + luckBonus * 0.5;
+    }
+    function getCritMultiplier() { return hero.classId === 'archer' ? 2.0 : 1.5; }
+    function getPhysicalWeaponBonus() {
+        return (hero.weapon && (hero.weapon.type === 'sword' || hero.weapon.type === 'bow')) ? (hero.weapon.level - 1) * 3 : 0;
+    }
+    function getMagicWeaponBonus() {
+        return (hero.weapon && hero.weapon.type === 'staff') ? (hero.weapon.level - 1) * 3 : 0;
+    }
+    function getAttackLabel() {
+        if (hero.classId === 'swordsman') return '🗡️ Sword Slash';
+        if (hero.classId === 'archer') return '🏹 Bow Shot';
+        if (hero.classId === 'mage') return '🪄 Staff Strike';
+        return 'Physical Strike';
+    }
+
+    function getArmorLevel(slot) {
+        return Math.max(1, hero.armorSlots?.[slot] || 1);
+    }
+
+    function getArmorRating() {
+        return Object.keys(ARMOR_SLOT_DATA).reduce((sum, slot) => {
+            const data = ARMOR_SLOT_DATA[slot];
+            return sum + ((getArmorLevel(slot) - 1) * data.weight);
+        }, getArmorAffixRatingBonus());
+    }
+
+    function getArmorDamageReductionFlat() {
+        return Math.floor(getArmorRating() * 0.55);
+    }
+
+    function getArmorDamageReductionPercent() {
+        return Math.min(0.36, getArmorRating() * 0.015);
+    }
+
+    function getGuildRankLabel() {
+        if (!guild.registered) return 'Unregistered';
+        return GUILD_RANKS[guild.rankIndex] || 'F';
+    }
+
+    function getGuildQuestById(id) {
+        return QUEST_DEFS.find(q => q.id === id) || null;
+    }
+
+    function getActiveGuildQuest() {
+        return guild.activeQuestId ? getGuildQuestById(guild.activeQuestId) : null;
+    }
+
+    function getAvailableQuests() {
+        const rank = guild.registered ? guild.rankIndex : -1;
+        return QUEST_DEFS.filter(q => rank >= q.rankIndex);
+    }
+
+    function updateGuildRank() {
+        if (!guild.registered) return false;
+        let changed = false;
+        while (guild.rankIndex < GUILD_RANKS.length - 1 && guild.xp >= GUILD_XP_THRESHOLDS[guild.rankIndex + 1]) {
+            guild.rankIndex += 1;
+            changed = true;
+        }
+        return changed;
+    }
+
+    function completeActiveGuildQuest(enemyRef) {
+        const quest = getActiveGuildQuest();
+        if (!quest || !enemyRef || !enemyRef.questBossId) return false;
+        if (quest.targetBoss !== enemyRef.questBossId) return false;
+        guild.xp += quest.guildXp;
+        hero.gold += Math.ceil(quest.gold * getCharismaGoldMultiplier());
+        hero.xp += quest.heroXp;
+        guild.activeQuestId = null;
+        const rankChanged = updateGuildRank();
+        addLogMsg(`🏛️ Guild quest complete: ${quest.title}.`, '#f1c40f');
+        addLogMsg(`🏅 Guild +${quest.guildXp} XP, +${Math.ceil(quest.gold * getCharismaGoldMultiplier())} Gold, +${quest.heroXp} Hero XP.`, '#2ecc71');
+        if (rankChanged) addLogMsg(`✨ Guild Rank increased to ${getGuildRankLabel()}!`, '#8fd1ff');
+        return true;
+    }
+
+    function createQuestBoss(name, quest) {
+        const spec = QUEST_BOSS_LIBRARY[name];
+        if (!spec) return null;
+        return {
+            name: spec.name,
+            hp: spec.hp,
+            maxHp: spec.hp,
+            sprite: spec.sprite,
+            xpReward: spec.xp,
+            goldReward: spec.gold,
+            baseDmg: spec.dmg,
+            dieSides: spec.die,
+            burn: null,
+            polymorphTurns: 0,
+            origSprite: null,
+            origName: null,
+            isBoss: true,
+            skills: [...(spec.skills || [])],
+            questBossId: quest?.id || null,
+            bossTitle: spec.name,
+            envTag: spec.env,
+            groupSize: 1
+        };
+    }
+
+    function createGenericBoss(base, env) {
+        const bossMultiplier = env === 'volcanic' ? 12 : env === 'crypt' ? 10 : 8;
+        const skillPool = env === 'crypt'
+            ? ['drain', 'curse', 'soulRend']
+            : env === 'volcanic'
+                ? ['magmaBurst', 'lavaWave', 'quake', 'emberNova']
+                : ['slash', 'command'];
+        return {
+            name: `👑 Alpha ${base.name}`,
+            hp: Math.floor(base.hp * bossMultiplier),
+            maxHp: Math.floor(base.hp * bossMultiplier),
+            sprite: base.sprite,
+            xpReward: Math.floor(base.xp * bossMultiplier),
+            goldReward: Math.floor(base.gold * bossMultiplier),
+            baseDmg: Math.floor(base.dmg * bossMultiplier),
+            dieSides: Math.floor(base.die * bossMultiplier),
+            burn: null,
+            polymorphTurns: 0,
+            origSprite: null,
+            origName: null,
+            isBoss: true,
+            skills: skillPool,
+            groupSize: 1
+        };
+    }
+
+    function createBossSkillLog(skill) {
+        const map = {
+            slash: 'cleaves with a brutal overhead slash',
+            command: 'roars an order that rattles your nerves',
+            ambush: 'vanishes into the brush and reappears with a vicious strike',
+            drain: 'drains life from the air around you',
+            curse: 'hurls a curse through the darkness',
+            sunder: 'smashes through your guard',
+            siphon: 'siphons heat and strength from the battlefield',
+            magmaBurst: 'erupts in a burst of molten rock',
+            emberNova: 'blasts the arena with searing embers',
+            lavaWave: 'unleashes a wave of lava',
+            quake: 'slams the ground in a crushing quake',
+            infernoCrown: 'summons a crown of inferno flame',
+            soulRend: 'tears at your spirit with a dark spell'
+        };
+        return map[skill] || skill;
+    }
+
+    function shakeEnemy() {
+        const eNode = document.getElementById("e-node-spr");
+        if (eNode) eNode.classList.add("anim-shake");
+    }
+
+    function launchProjectile(type, onImpact) {
+        const arena = document.getElementById("battle-arena");
+        const pNode = document.getElementById("p-node-spr");
+        if (pNode) pNode.classList.add("anim-p-strike");
+        if (!arena) { onImpact(); return; }
+        const icons = { missile: '✨', fireball: '🔥', shield: '🛡️', polymorph: '🌀' };
+        const proj = document.createElement("div");
+        proj.className = "spell-projectile";
+        proj.innerText = icons[type] || '✨';
+        arena.appendChild(proj);
+        setTimeout(() => { proj.remove(); onImpact(); }, 450);
+    }
+
+    function emojiToTwemojiCode(input) {
+        return Array.from(input)
+            .map(ch => ch.codePointAt(0).toString(16))
+            .join('-');
+    }
+
+    function spriteMarkup(emoji, size = 68, extraClass = '') {
+        const classes = ['sprite-emoji', extraClass].filter(Boolean).join(' ');
+        return `<span class="${classes}" style="display:inline-flex; align-items:center; justify-content:center; width:${size}px; height:${size}px; font-size:${Math.round(size * 0.9)}px; line-height:1; filter:drop-shadow(0 4px 8px rgba(0,0,0,0.55)); user-select:none;">${emoji}</span>`;
+    }
+
+
+
+    function getMaxStaminaFromStats() {
+        return 100 + Math.max(0, getEffectiveStat('sta') - 10) * 5;
+    }
+
+    function refreshDerivedVitals(fillStamina = false) {
+        hero.maxStamina = getMaxStaminaFromStats();
+        hero.stamina = fillStamina ? hero.maxStamina : Math.min(hero.stamina ?? hero.maxStamina, hero.maxStamina);
+    }
+
+    function useStamina(cost, reason = 'You are too exhausted to continue.') {
+        const spend = Math.max(0, Math.floor(cost));
+        if (hero.stamina < spend) {
+            alert(reason);
+            return false;
+        }
+        hero.stamina -= spend;
+        return true;
+    }
+
+    function getCharismaDiscountRate() {
+        return Math.min(0.35, Math.max(0, (hero.stats.cha - 10) * 0.015));
+    }
+
+    function getCharismaGoldMultiplier() {
+        return 1 + Math.min(0.35, Math.max(0, (hero.stats.cha - 10) * 0.0125));
+    }
+
+    function getLuckScore() {
+        let total = hero.luck || 10;
+        if (hero.runes.includes("fury")) total += 1;
+        if (hero.runes.includes("warding")) total += 1;
+        if (hero.gearAffixes?.weapon?.luck) total += hero.gearAffixes.weapon.luck;
+        for (const slot of Object.keys(ARMOR_SLOT_DATA)) {
+            if (hero.gearAffixes?.[slot]?.luck) total += hero.gearAffixes[slot].luck;
+        }
+        return total;
+    }
+
+    function getLuckRareChanceBonus() {
+        return Math.min(0.12, Math.max(0, (getLuckScore() - 10) * 0.006));
+    }
+
+    function getGoldRewardMultiplier() {
+        let mult = getCharismaGoldMultiplier() * (1 + Math.min(0.15, Math.max(0, (getLuckScore() - 10) * 0.008)));
+        mult *= 1 + getWeaponAffixGoldBonus();
+        if (hero.tempGoldBoostTurns > 0) mult *= 1.10;
+        return mult;
+    }
+
+    function getRuneChestSuccessChance() {
+        return Math.min(0.65, 0.35 + getLuckRareChanceBonus());
+    }
+
+    function consumeTempGoldBoost() {
+        if (hero.tempGoldBoostTurns > 0) hero.tempGoldBoostTurns -= 1;
+    }
+
+    function getEffectiveStat(statName) {
+        let value = hero.stats[statName] || 10;
+        if (hero.injury?.stat === statName) value += hero.injury.penalty;
+        return Math.max(1, value);
+    }
+
+    function applyInjury(injuryId = null) {
+        if (hero.injury) return false;
+        const pool = {
+            bruise: { name: "Bruised Arm", stat: "str", penalty: -2, hp: -10, mp: 0, sta: -8, text: "A brutal hit leaves your arm bruised and weak." },
+            sprain: { name: "Sprained Ankle", stat: "dex", penalty: -2, hp: 0, mp: 0, sta: -14, text: "You twist your ankle badly on the impact." },
+            haze: { name: "Battle Haze", stat: "int", penalty: -2, hp: 0, mp: -8, sta: -6, text: "The blow leaves your mind foggy and slow." }
+        };
+        const injury = pool[injuryId] || pool[["bruise", "sprain", "haze"][Math.floor(Math.random() * 3)]];
+        hero.injury = injury;
+        hero.stats[injury.stat] += injury.penalty;
+        if (injury.hp) { hero.maxHp += injury.hp; hero.hp = Math.max(1, Math.min(hero.hp, hero.maxHp)); }
+        if (injury.mp) { hero.maxMp += injury.mp; hero.mp = Math.max(0, Math.min(hero.mp, hero.maxMp)); }
+        if (injury.sta) { hero.maxStamina += injury.sta; hero.stamina = Math.max(0, Math.min(hero.stamina, hero.maxStamina)); }
+        addLogMsg(`🩸 Injury: ${injury.name}. ${injury.text}`, "#e74c3c");
+        return true;
+    }
+
+    function healInjury() {
+        if (!hero.injury) return false;
+        const injury = hero.injury;
+        hero.stats[injury.stat] -= injury.penalty;
+        if (injury.hp) { hero.maxHp -= injury.hp; hero.hp = Math.min(hero.hp, hero.maxHp); }
+        if (injury.mp) { hero.maxMp -= injury.mp; hero.mp = Math.min(hero.mp, hero.maxMp); }
+        if (injury.sta) { hero.maxStamina -= injury.sta; hero.stamina = Math.min(hero.stamina, hero.maxStamina); }
+        hero.injury = null;
+        return true;
+    }
+
+    function getInjuryLabel() {
+        return hero.injury ? hero.injury.name : "None";
+    }
+
+    function registerBestiaryEncounter(encounter, defeated = false) {
+        if (!encounter || !encounter.name) return;
+        if (!hero.bestiary[encounter.name]) {
+            hero.bestiary[encounter.name] = {
+                seen: 0,
+                defeated: 0,
+                elite: !!encounter.isElite,
+                boss: !!encounter.isBoss,
+                env: encounter.envTag || currentEnv
+            };
+        }
+        hero.bestiary[encounter.name].seen += 1;
+        if (defeated) hero.bestiary[encounter.name].defeated += 1;
+        if (encounter.isBoss) hero.bestiary[encounter.name].boss = true;
+        if (encounter.isElite) hero.bestiary[encounter.name].elite = true;
+    }
+
+    function getBestiaryEntries() {
+        return Object.entries(hero.bestiary || {})
+            .map(([name, data]) => ({ name, ...data }))
+            .sort((a, b) => (b.defeated + b.seen) - (a.defeated + a.seen));
+    }
+
+    function getEliteChance(env) {
+        const base = env === 'volcanic' ? 0.12 : env === 'crypt' ? 0.10 : 0.08;
+        return Math.min(0.22, base + getLuckRareChanceBonus());
+    }
+
+    function createEliteMonster(base, env) {
+        const eliteMultiplier = env === 'volcanic' ? 2.3 : env === 'crypt' ? 2.1 : 1.9;
+        const skillPool = env === 'crypt'
+            ? ['drain', 'curse']
+            : env === 'volcanic'
+                ? ['magmaBurst', 'emberNova']
+                : ['command', 'ambush'];
+        return {
+            name: `★ Elite ${base.name}`,
+            hp: Math.floor(base.hp * eliteMultiplier),
+            maxHp: Math.floor(base.hp * eliteMultiplier),
+            sprite: base.sprite,
+            xpReward: Math.floor(base.xp * eliteMultiplier * 1.2),
+            goldReward: Math.floor(base.gold * eliteMultiplier * 1.2),
+            baseDmg: Math.floor(base.dmg * (eliteMultiplier * 0.9)),
+            dieSides: Math.floor(base.die + 2),
+            burn: null,
+            polymorphTurns: 0,
+            origSprite: null,
+            origName: null,
+            isBoss: false,
+            isElite: true,
+            skills: skillPool,
+            groupSize: 1,
+            phase: 1,
+            phaseMarks: { 2: false, 3: false, 4: false }
+        };
+    }
+
+    function maybeTriggerEnemyPhases() {
+        if (!enemy || !enemy.isBoss || !enemy.maxHp) return;
+        if (!enemy.phaseMarks) enemy.phaseMarks = { 2: false, 3: false, 4: false };
+        const thresholds = [
+            { phase: 2, ratio: 0.70, name: 'Second Phase', buffDmg: 1, buffDice: 1, skill: 'rage' },
+            { phase: 3, ratio: 0.40, name: 'Third Phase', buffDmg: 2, buffDice: 1, skill: 'sunder' },
+            { phase: 4, ratio: 0.15, name: 'Final Phase', buffDmg: 3, buffDice: 2, skill: 'infernoCrown' }
+        ];
+        for (const phase of thresholds) {
+            if (!enemy.phaseMarks[phase.phase] && enemy.hp > 0 && enemy.hp <= enemy.maxHp * phase.ratio) {
+                enemy.phaseMarks[phase.phase] = true;
+                enemy.phase = phase.phase;
+                enemy.baseDmg += phase.buffDmg;
+                enemy.dieSides += phase.buffDice;
+                enemy.skills = Array.from(new Set([...(enemy.skills || []), phase.skill]));
+                addLogMsg(`👑 ${enemy.name} enters ${phase.name}! Its attacks grow fiercer.`, "#f1c40f");
+                break;
+            }
+        }
+    }
+
+    function maybeRollGearAffix(slot, upgradeLevel) {
+        if (!hero.gearAffixes) hero.gearAffixes = { weapon: null, helmet: null, armor: null, gloves: null, pants: null, legs: null };
+        if (slot === 'weapon' && hero.gearAffixes.weapon) return null;
+        if (slot !== 'weapon' && hero.gearAffixes[slot]) return null;
+        if (upgradeLevel < 3 && Math.random() > 0.25) return null;
+        const weaponPool = [
+            { id: 'keen', name: 'Keen', desc: '+5 crit chance', crit: 5 },
+            { id: 'brutal', name: 'Brutal', desc: '+4 physical damage', dmg: 4 },
+            { id: 'arcane', name: 'Arcane', desc: '+4 magic damage', magic: 4 },
+            { id: 'greedy', name: 'Greedy', desc: '+10% gold on kill', gold: 10 }
+        ];
+        const armorPool = [
+            { id: 'fortified', name: 'Fortified', desc: '+2 armor', armor: 2 },
+            { id: 'vigilant', name: 'Vigilant', desc: '+2 luck', luck: 2 },
+            { id: 'hardy', name: 'Hardy', desc: '+12 max HP', hp: 12 },
+            { id: 'swift', name: 'Swift', desc: '+1 DEX', dex: 1 }
+        ];
+        const pool = slot === 'weapon' ? weaponPool : armorPool;
+        const affix = { ...pool[Math.floor(Math.random() * pool.length)] };
+        hero.gearAffixes[slot] = affix;
+        if (affix.hp) { hero.maxHp += affix.hp; hero.hp += affix.hp; }
+        if (affix.dex) { hero.stats.dex += affix.dex; }
+        if (affix.luck) { hero.luck += affix.luck; }
+        if (slot === 'weapon' && affix.magic) { hero.maxMp += 6; hero.mp += 6; }
+        return affix;
+    }
+
+    function describeAffix(slot) {
+        const affix = hero.gearAffixes?.[slot];
+        if (!affix) return 'None';
+        return affix.name;
+    }
+
+    function getWeaponAffixDamageBonus() {
+        const affix = hero.gearAffixes?.weapon;
+        return affix?.dmg || 0;
+    }
+
+    function getWeaponAffixCritBonus() {
+        const affix = hero.gearAffixes?.weapon;
+        return affix?.crit || 0;
+    }
+
+    function getWeaponAffixMagicBonus() {
+        const affix = hero.gearAffixes?.weapon;
+        return affix?.magic || 0;
+    }
+
+    function getWeaponAffixGoldBonus() {
+        const affix = hero.gearAffixes?.weapon;
+        return affix?.gold ? affix.gold / 100 : 0;
+    }
+
+    function getArmorAffixRatingBonus() {
+        return Object.keys(ARMOR_SLOT_DATA).reduce((sum, slot) => sum + (hero.gearAffixes?.[slot]?.armor || 0), 0);
+    }
+
+    function getArmorAffixLuckBonus() {
+        return Object.keys(ARMOR_SLOT_DATA).reduce((sum, slot) => sum + (hero.gearAffixes?.[slot]?.luck || 0), 0);
+    }
+
+    function getExtraBossLootMultiplier() {
+        return 1 + Math.min(0.15, getLuckRareChanceBonus());
+    }
+
+    function getHiddenDungeonChance() {
+        return 0.015 + getLuckRareChanceBonus();
+    }
+
+    function getArenaTitle() {
+        return arenaRun ? `Trial Wave ${arenaRun.wave + 1}/3` : 'Arena Trial';
+    }
+
+    function isGroupEncounter() {
+        return Array.isArray(enemy.groupMembers) && enemy.groupMembers.length > 0;
+    }
+
+    function syncEnemyEncounterTotals() {
+        if (!isGroupEncounter()) return;
+        enemy.groupMembers.forEach(m => {
+            if (m.hp < 0) m.hp = 0;
+            if (m.hp > m.maxHp) m.hp = m.maxHp;
+        });
+        enemy.hp = enemy.groupMembers.reduce((sum, m) => sum + Math.max(0, m.hp), 0);
+        enemy.maxHp = enemy.groupMembers.reduce((sum, m) => sum + Math.max(0, m.maxHp), 0);
+    }
+
+    function applyDamageToEnemy(dmg) {
+        const amount = Math.max(0, Math.floor(dmg));
+        if (!isGroupEncounter()) {
+            enemy.hp = Math.max(0, enemy.hp - amount);
+            return amount;
+        }
+        let remaining = amount;
+        for (const member of enemy.groupMembers) {
+            if (remaining <= 0) break;
+            if (member.hp <= 0) continue;
+            const taken = Math.min(member.hp, remaining);
+            member.hp -= taken;
+            remaining -= taken;
+        }
+        syncEnemyEncounterTotals();
+        return amount;
+    }
+
+    function renderEnemyCombatHtml() {
+        if (!isGroupEncounter()) {
+            return spriteMarkup(enemy.sprite, enemy.isBoss ? 118 : 92, "enemy-combat");
+        }
+        return `
+            <div style="display:flex; gap:8px; justify-content:center; align-items:flex-end; flex-wrap:wrap; max-width:220px; padding:4px 0;">
+                ${enemy.groupMembers.map((member, idx) => `
+                    <div style="display:flex; flex-direction:column; align-items:center; width:68px; opacity:${member.hp > 0 ? '1' : '0.35'};">
+                        <div style="font-size:0.72rem; color:#dbe7ff; margin-bottom:2px;">${idx + 1}</div>
+                        <div>${spriteMarkup(member.sprite, 58, 'enemy-combat')}</div>
+                        <div style="width:58px; font-size:0.62rem; color:#dbe7ff; margin-top:2px;">${member.hp}/${member.maxHp}</div>
+                        <div class="glow-bar-bg" style="height:10px; border-radius:6px; margin-top:2px;"><div class="glow-bar-fill" style="width:${(member.hp / member.maxHp) * 100}%; background:linear-gradient(90deg, #e53935, #ff7373);"></div></div>
+                    </div>
+                `).join('')}
+            </div>`;
+    }
+
+    function getAreaTitle(env) {
+        if (env === "grasslands") return "Whispering Grasslands";
+        if (env === "crypt") return "Forgotten Crypt";
+        if (env === "volcanic") return "Molten Peaks";
+        if (env === "dungeon") return "Ember Dungeon";
+        if (env === "arena") return "Arena Trial";
+        return "Town Courtyard";
+    }
+
+    function startTransition(nextAction, message = 'Moving onward...') {
+        view.style.transition = 'none';
+        view.style.opacity = '1';
+        view.className = 'env-town';
+        view.innerHTML = `
+            <div id="transition-overlay" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:linear-gradient(180deg, rgba(9, 18, 48, 0.92), rgba(4, 9, 24, 0.84)); opacity:0; transition:opacity 0.75s ease; z-index:5; pointer-events:none;">
+                <div class="rpg-panel isekai-panel" style="padding:28px; width:100%; max-width:520px; text-align:center; opacity:0; transition:opacity 0.65s ease;">
+                    <div style="font-size:3rem; margin-bottom:10px;">✦</div>
+                    <h2 style="color:#dbe7ff; margin:0 0 8px 0;">${message}</h2>
+                    <p style="color:#9fb3d7; margin:0;">The world fades and the next scene gathers around you.</p>
+                </div>
+            </div>
+        `;
+        const overlay = document.getElementById('transition-overlay');
+        const panel = overlay ? overlay.firstElementChild : null;
+        requestAnimationFrame(() => {
+            if (overlay) overlay.style.opacity = '1';
+            if (panel) panel.style.opacity = '1';
+        });
+        setTimeout(() => {
+            if (panel) panel.style.opacity = '0';
+            if (overlay) overlay.style.opacity = '0';
+        }, 900);
+        setTimeout(() => {
+            if (typeof nextAction === 'function') nextAction();
+            requestAnimationFrame(() => {
+                view.style.opacity = '1';
+            });
+        }, 1500);
+    }
+
+    function getJourneyEventPool(env, kind) {
+        if (kind === "town") {
+            return [
+                { type: "narrative", text: "We keep to the road and watch the tree line for anything moving." },
+                { type: "check", text: "A blockade of soldiers inspects travelers ahead. We try to slip past without drawing attention.", stat: "dex", dc: 13, damage: 5, successText: "We move like shadows and pass the checkpoint unseen.", failText: "A guard shoulder-checks us hard enough to hurt." },
+                { type: "loot", text: "A loose pouch of coins lies in the mud by the roadside.", goldMin: 8, goldMax: 18, successText: "We pocket the stray coin purse and keep moving." },
+                { type: "ambush", text: "A small gang leaps from behind a wagon and cuts off the path home.", name: "Road Bandits", sprite: "🥷", hp: 18, xp: 18, gold: 14, dmg: 3, die: 5, groupSize: 2 },
+            ];
+        }
+
+        if (env === "crypt") {
+            return [
+                { type: "narrative", text: "Cold stone and stale air press in from every side as we move deeper." },
+                { type: "check", text: "A cracked stairwell collapses ahead. We try to cross before it gives way.", stat: "dex", dc: 14, damage: 7, successText: "We catch the edge and slide across safely.", failText: "The stone snaps under our feet and we slam into the floor." },
+                { type: "loot", text: "A forgotten satchel rests beside a broken altar.", goldMin: 12, goldMax: 24, successText: "We snatch the satchel and find a few useful coins." },
+                { type: "ambush", text: "Three restless dead rise at once and lunge from the shadows.", name: "Skeleton Trio", sprite: "💀", hp: 24, xp: 24, gold: 20, dmg: 4, die: 6, groupSize: 3 },
+            ];
+        }
+
+        if (env === "volcanic") {
+            return [
+                { type: "narrative", text: "Ash drifts across the trail and stings our eyes as we push forward." },
+                { type: "check", text: "A river of lava blocks the route. We time the crossing between bursts of heat.", stat: "dex", dc: 15, damage: 8, successText: "We dash across before the heat catches us.", failText: "The ground gives way and the heat scorches us hard." },
+                { type: "loot", text: "A scorched pouch lies half-buried in cinders.", goldMin: 14, goldMax: 28, successText: "We pry open the pouch and claim what survived the fire." },
+                { type: "ambush", text: "A fire-forged raiding party emerges from the haze and circles us.", name: "Ember Raiders", sprite: "🔥", hp: 30, xp: 30, gold: 26, dmg: 5, die: 7, groupSize: 3 },
+            ];
+        }
+
+        if (env === "dungeon") {
+            return [
+                { type: "narrative", text: "The corridor groans around us and every step sounds too loud." },
+                { type: "check", text: "A slab floor drops away ahead. We jump the gap before it swallows us.", stat: "dex", dc: 14, damage: 7, successText: "We clear the gap without losing our footing.", failText: "We catch the edge badly and scrape ourselves on the fall." },
+                { type: "loot", text: "A cracked chest lid reveals a few coins and dust.", goldMin: 10, goldMax: 20, successText: "We grab the scattered coins before the dark swallows them." },
+                { type: "ambush", text: "A trio of dungeon wardens rushes in and tries to pin us in place.", name: "Dungeon Wardens", sprite: "🛡️", hp: 28, xp: 28, gold: 24, dmg: 5, die: 6, groupSize: 3 },
+            ];
+        }
+
+        return [
+            { type: "narrative", text: "Moving slowly and dodging branches as we go." },
+            { type: "check", text: "Encountered a river. We try to cross.", stat: "dex", dc: 12, damage: 6, successText: "We cross without losing our footing.", failText: "The current yanks our legs and we take a hard spill." },
+            { type: "loot", text: "We spot a pouch of coins lying on the ground.", goldMin: 8, goldMax: 16, successText: "We pocket the pouch before anyone notices." },
+            { type: "ambush", text: "A bandit trio bursts from the brush and surrounds us.", name: "Bandit Trio", sprite: "🥷", hp: 22, xp: 22, gold: 18, dmg: 4, die: 6, groupSize: 3 },
+            { type: "ambush", text: "A soldier blockade stops the path ahead and reaches for their blades.", name: "Soldier Patrol", sprite: "🛡️", hp: 24, xp: 24, gold: 20, dmg: 4, die: 6, groupSize: 3 },
+        ];
+    }
+
+    function pickJourneyEvent(env, kind) {
+        if (kind !== 'dungeon' && Math.random() < getHiddenDungeonChance()) {
+            return { type: 'hiddenDungeon', text: 'The path opens onto a sealed archway veiled by moss and old magic.', successText: 'A hidden vault reveals itself from the mist.' };
+        }
+        const pool = getJourneyEventPool(env, kind);
+        return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    function getJourneyEncounterChance(destination) {
+        const kind = destination?.kind || "hunt";
+        const env = destination?.env || "town";
+        if (kind === "town") return 0.12;
+        if (env === "grasslands") return 0.22;
+        if (env === "crypt") return 0.26;
+        if (env === "volcanic") return 0.30;
+        if (env === "dungeon") return 0.18;
+        return 0.22;
+    }
+
+    function rollJourneyDie(sides = 20) {
+        return Math.floor(Math.random() * sides) + 1;
+    }
+
+    function getStatModifier(statName) {
+        return Math.floor(((hero.stats[statName] || 10) - 10) / 2);
+    }
+
+    function createAmbushEncounter(event, destination) {
+        const groupSize = event.groupSize || 3;
+        const baseGold = event.gold || 15;
+        const baseXp = event.xp || 18;
+        const baseDmg = event.dmg || 3;
+        const baseDie = event.die || 6;
+        const members = Array.from({ length: groupSize }, (_, idx) => ({
+            name: `${event.name || 'Ambusher'} ${idx + 1}`,
+            sprite: event.sprite || '🥷',
+            maxHp: Math.ceil((event.hp || 20) * (0.85 + idx * 0.08)),
+            hp: Math.ceil((event.hp || 20) * (0.85 + idx * 0.08)),
+            baseDmg: Math.ceil(baseDmg * (0.85 + idx * 0.12)),
+            dieSides: Math.ceil(baseDie + idx + 1)
+        }));
+        const totalHp = members.reduce((sum, m) => sum + m.hp, 0);
+        return {
+            name: `${event.name || 'Ambush'} x${groupSize}`,
+            hp: totalHp,
+            maxHp: members.reduce((sum, m) => sum + m.maxHp, 0),
+            sprite: event.sprite || '🥷',
+            xpReward: Math.ceil(baseXp * groupSize * 1.15),
+            goldReward: Math.ceil(baseGold * groupSize * 1.10),
+            baseDmg: Math.ceil(baseDmg * 1.1),
+            dieSides: Math.ceil(baseDie + groupSize),
+            burn: null,
+            polymorphTurns: 0,
+            origSprite: null,
+            origName: null,
+            isBoss: false,
+            groupSize,
+            groupMembers: members,
+            travelArrival: destination.onArrival,
+            travelArrivalLabel: destination.label
+        };
+    }
+
+    function renderJourneyScene(destination, event) {
+        view.className = `env-${destination.env || "town"}`;
+        const title = destination.kind === "town" ? "The Road Home" : `Journey to ${destination.label}`;
+        const modeText = event.type === "ambush" ? "An encounter blocks the path." : event.type === "check" ? "A quick check stands between us and the next step." : "The road is quiet for the moment.";
+        const travelBody = event.type === "check"
+            ? `
+                <div style="background: rgba(12,24,58,0.58); padding: 14px; border-radius: 14px; border: 1px solid rgba(160,185,255,0.2); margin: 14px 0 18px 0;">
+                    <div style="font-size: 2.8rem; margin-bottom: 8px;">🎲</div>
+                    <div id="journey-die" style="font-size: 3rem; font-weight: bold; color: #f1c40f; margin-bottom: 8px;">?</div>
+                    <div style="color:#bbb; margin-bottom:6px;">${event.stat.toUpperCase()} Check — DC ${event.dc}</div>
+                    <div style="color:#888; font-size:0.85rem;">${event.text}</div>
+                </div>
+            `
+            : event.type === "loot"
+                ? `<div style="font-size:3rem; margin: 10px 0 6px 0;">🪙</div><div style="color:#ddd; margin-bottom:6px;">${event.text}</div>`
+                : event.type === "ambush"
+                    ? `<div style="font-size:3rem; margin: 10px 0 6px 0;">⚔️</div><div style="color:#ddd; margin-bottom:6px;">${event.text}</div><div style="color:#f1c40f; font-size:0.9rem; margin-bottom:10px;">${event.name} (${event.groupSize || 3} enemies)</div>`
+                    : event.type === 'hiddenDungeon'
+                        ? `<div style="font-size:3rem; margin: 10px 0 6px 0;">🗝️</div><div style="color:#ddd; margin-bottom:6px;">${event.text}</div>`
+                        : `<div style="font-size:3rem; margin: 10px 0 6px 0;">🌲</div><div style="color:#ddd; margin-bottom:6px;">${event.text}</div>`;
+
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding: 24px; width: 100%; max-width: 580px; text-align: center;">
+                <div class="isekai-tag">🧭 Travel Event</div>
+                <h1 style="color:#dbe7ff; margin:0 0 8px 0;">${title}</h1>
+                <p style="color:#bbb; margin:0 0 12px 0;">${modeText}</p>
+                ${renderStatPanel()}
+                ${travelBody}
+                <div id="journey-result" style="min-height: 28px; margin-bottom: 12px; color:#ddd;"></div>
+                <div style="display:flex; justify-content:center; gap:10px; flex-wrap:wrap;">
+                    ${event.type === "check" ? '<button id="btn-journey-roll" class="rpg-btn" style="background:linear-gradient(180deg,#2980b9,#1f618d);">Roll DEX Check</button>' : ''}
+                    ${event.type === "ambush" ? '<button id="btn-journey-ambush" class="rpg-btn" style="background:linear-gradient(180deg,#c0392b,#962d22);">Draw Weapons</button>' : ''}
+                    ${event.type !== "ambush" ? '<button id="btn-journey-next" class="rpg-btn" style="display:' + (event.type === "check" ? 'none' : 'inline-flex') + '; background:linear-gradient(180deg,#27ae60,#1e7e43);">Next</button>' : ''}
+                </div>
+            </div>
+        `;
+
+        const nextBtn = document.getElementById("btn-journey-next");
+
+        if (event.type === "check") {
+            const rollBtn = document.getElementById("btn-journey-roll");
+            const resultBox = document.getElementById("journey-result");
+            const dieBox = document.getElementById("journey-die");
+            rollBtn.onclick = () => {
+                rollBtn.disabled = true;
+                resultBox.textContent = "Rolling...";
+                let ticks = 0;
+                const finalRoll = rollJourneyDie(20);
+                const anim = setInterval(() => {
+                    ticks += 1;
+                    if (dieBox) dieBox.textContent = String(rollJourneyDie(20));
+                    if (ticks >= 12) {
+                        clearInterval(anim);
+                        const mod = getStatModifier(event.stat);
+                        const total = finalRoll + mod;
+                        const success = total >= event.dc;
+                        if (dieBox) dieBox.textContent = String(finalRoll);
+                        if (success) {
+                            resultBox.innerHTML = `<span style="color:#2ecc71;">${event.successText || "We make the crossing safely."}</span> <span style="color:#f1c40f;">(Rolled ${finalRoll} + ${mod} = ${total})</span>`;
+                        } else {
+                            const dmg = Math.max(1, Math.floor((event.damage || 6) + (event.dc - total)));
+                            hero.hp = Math.max(0, hero.hp - dmg);
+                            resultBox.innerHTML = `<span style="color:#e74c3c;">${event.failText || "We lose our footing and get hurt."}</span> <span style="color:#f1c40f;">(Rolled ${finalRoll} + ${mod} = ${total})</span> <span style="color:#ffb36b;">-${dmg} HP</span>`;
+                            renderStatPanel();
+                            if (hero.hp <= 0) {
+                                setTimeout(() => resolveMatch(false), 550);
+                                return;
+                            }
+                        }
+                        if (nextBtn) nextBtn.style.display = 'inline-flex';
+                        nextBtn.textContent = 'Next';
+                        nextBtn.onclick = () => startTransition(() => finishJourney(destination), 'Moving onward...');
+                    }
+                }, 55);
+            };
+        }
+
+        if (event.type === "loot") {
+            if (nextBtn) nextBtn.onclick = () => {
+                const goldGain = Math.floor(event.goldMin + Math.random() * ((event.goldMax - event.goldMin) + 1));
+                hero.gold += goldGain;
+                const resultBox = document.getElementById("journey-result");
+                resultBox.innerHTML = `${event.successText || "We claim the loot."} <span style="color:#f1c40f;">+${goldGain} Gold</span>`;
+                startTransition(() => finishJourney(destination), 'Moving onward...');
+            };
+        }
+
+        if (event.type === "narrative") {
+            if (nextBtn) nextBtn.onclick = () => startTransition(() => finishJourney(destination), 'Moving onward...');
+        }
+
+        if (event.type === "ambush") {
+            document.getElementById("btn-journey-ambush").onclick = () => {
+                forcedEncounter = createAmbushEncounter(event, destination);
+                currentEnv = destination.env || currentEnv;
+                enterCombatState();
+            };
+        }
+
+        if (event.type === 'hiddenDungeon') {
+            const nextBtn = document.getElementById('btn-journey-next');
+            if (nextBtn) {
+                nextBtn.style.display = 'inline-flex';
+                nextBtn.onclick = () => {
+                    hiddenDungeonUnlocked = true;
+                    startTransition(() => startDungeonRun('Ancient Vault'), 'The hidden vault awakens...');
+                };
+            }
+        }
+    }
+
+    function finishJourney(destination) {
+        travelJourney = null;
+        if (destination && typeof destination.onArrival === "function") {
+            destination.onArrival();
+        }
+    }
+
+    function beginJourney(destination) {
+        const journeyDestination = {
+            kind: destination.kind || "travel",
+            env: destination.env || "town",
+            label: destination.label || getAreaTitle(destination.env || "town"),
+            onArrival: destination.onArrival || (() => openTownHub())
+        };
+        const travelCost = journeyDestination.kind === 'search' ? 10 : 5;
+        if (!useStamina(travelCost, 'You need more stamina before you can continue traveling.')) { openTownHub(); return false; }
+        travelJourney = journeyDestination;
+
+        const encounterChance = getJourneyEncounterChance(journeyDestination);
+        const encounterRoll = Math.random();
+
+        const renderEvent = () => {
+            if (encounterRoll < encounterChance) {
+                const event = pickJourneyEvent(journeyDestination.env, journeyDestination.kind);
+                renderJourneyScene(journeyDestination, event);
+            } else {
+                const calmTexts = [
+                    "The road stays quiet and the wind slips through the trees.",
+                    "We move carefully, keeping our eyes on the path ahead.",
+                    "Branches creak overhead as we travel in silence.",
+                    "Nothing blocks the way, only the sound of distant birds and shifting leaves."
+                ];
+                renderJourneyScene(journeyDestination, {
+                    type: "narrative",
+                    text: calmTexts[Math.floor(Math.random() * calmTexts.length)]
+                });
+            }
+        };
+
+        renderEvent();
+        return true;
+    }
+    // ==========================================
+    // 2. CHARACTER DESIGN ARCHITECTURE (VIEWS)
+    // ==========================================
+    function openCharacterCreation() {
+        view.style.opacity = '1';
+        let selectedRace = "Human";
+        let selectedClass = "swordsman";
+        let pointsLeft = 10;
+        let tStats = { str: 10, dex: 10, int: 10, sta: 10, cha: 10 };
+
+        function drawCreationScreen() {
+            view.className = "env-town";
+            view.innerHTML = `
+                <div class="rpg-panel isekai-panel" style="padding: 26px; width: 100%; max-width: 860px; text-align: center;">
+                    <div class="isekai-tag">✦ Isekai Summoning Circle ✦</div>
+                    <h1 style="color: #dbe7ff; margin: 0 0 6px 0; text-shadow: 0 2px 14px rgba(79,120,255,0.55);">Awaken in Another World</h1>
+                    <p style="color: #a9bddf; margin-bottom: 22px; font-size: 0.95rem;">Choose your origin, your calling, and the shape of your new life.</p>
+                    
+                    <div class="isekai-grid">
+                        <div class="isekai-box" style="display: flex; flex-direction: column; gap: 12px;">
+                            <div>
+                                <label style="font-weight:bold; color:#cfe0ff;">Race</label>
+                                <select id="sel-race" class="isekai-select">
+                                    ${Object.keys(RACES).map(r => `<option value="${r}" ${r===selectedRace?'selected':''}>${r} (${RACES[r].sprite})</option>`).join("")}
+                                </select>
+                                <div id="race-bonus" class="isekai-text" style="margin-top:6px;">${RACES[selectedRace].bonus}</div>
+                            </div>
+                            <div>
+                                <label style="font-weight:bold; color:#cfe0ff;">Class</label>
+                                <select id="sel-class" class="isekai-select">
+                                    ${Object.keys(CLASSES).map(c => `<option value="${c}" ${c===selectedClass?'selected':''}>${CLASSES[c].name}</option>`).join("")}
+                                </select>
+                                <div class="isekai-text" style="margin-top:6px;">${CLASSES[selectedClass].desc}</div>
+                            </div>
+                        </div>
+
+                        <div class="isekai-box">
+                            <div style="display:flex; justify-content:space-between; font-weight:bold; border-bottom:1px solid rgba(140,180,255,0.18); padding-bottom:6px; margin-bottom:10px;">
+                                <span style="color:#dbe7ff;">Attributes</span>
+                                <span style="color:#8fd1ff;">Points Remaining: ${pointsLeft}</span>
+                            </div>
+                            ${["str", "dex", "int", "sta", "cha"].map(s => `
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:0.95rem;">
+                                    <span style="text-transform: uppercase; font-weight:bold; color:#b8c7e6;">${s}: <span id="val-${s}" style="color:#fff;">${tStats[s]}</span></span>
+                                    <div style="display:flex; gap:6px;">
+                                        <div class="stat-dot" data-stat="${s}" data-dir="minus">-</div>
+                                        <div class="stat-dot" data-stat="${s}" data-dir="plus">+</div>
+                                    </div>
+                                </div>
+                            `).join("")}
+                        </div>
+                    </div>
+
+                    <button id="btn-finalize" class="rpg-btn" style="background: linear-gradient(180deg, #5f7cff, #273a7d); padding: 12px 40px; font-size: 1.05rem; width:100%; border-color: rgba(163,192,255,0.4);">Awaken Hero</button>
+                </div>
+            `;
+
+            document.getElementById("sel-race").onchange = (e) => { selectedRace = e.target.value; drawCreationScreen(); };
+            document.getElementById("sel-class").onchange = (e) => { selectedClass = e.target.value; drawCreationScreen(); };
+
+            document.querySelectorAll(".stat-dot").forEach(dot => {
+                dot.onclick = () => {
+                    let stat = dot.getAttribute("data-stat");
+                    let dir = dot.getAttribute("data-dir");
+                    if (dir === "plus" && pointsLeft > 0) { tStats[stat]++; pointsLeft--; }
+                    else if (dir === "minus" && tStats[stat] > 10) { tStats[stat]--; pointsLeft++; }
+                    drawCreationScreen();
+                };
+            });
+
+            document.getElementById("btn-finalize").onclick = () => {
+                let raceConfig = RACES[selectedRace];
+                let classConfig = CLASSES[selectedClass];
+
+                hero.race = selectedRace;
+                hero.classId = selectedClass;
+                hero.className = classConfig.name;
+                hero.sprite = classConfig.icon || raceConfig.sprite;
+                hero.stats = { ...tStats };
+
+                if(selectedRace === "Human") { Object.keys(hero.stats).forEach(k => hero.stats[k]+=1); }
+                else if(selectedRace === "Elf") { hero.stats.int += 2; hero.stats.dex += 1; }
+                else if(selectedRace === "Dwarf") { hero.stats.sta += 2; hero.stats.str += 1; }
+                else if(selectedRace === "Beastmen") { hero.stats.str += 2; hero.stats.cha += 1; }
+
+                hero.maxHp = classConfig.baseHp + (hero.stats.sta * 2);
+                hero.maxMp = classConfig.baseMp + (hero.stats.int * 1.5);
+                refreshDerivedVitals(true);
+                hero.hp = hero.maxHp;
+                hero.mp = hero.maxMp;
+                hero.spells = classConfig.spell ? [classConfig.spell] : [];
+                hero.weapon = { type: classConfig.weapon, level: 1 };
+                hero.pulverizeCooldown = 0;
+                hero.strMilestonesSeen = [];
+                hero.runes = [];
+                hero.burnTurns = 0; hero.burnDamage = 0;
+                hero.armorSlots = { helmet: 1, armor: 1, gloves: 1, pants: 1, legs: 1 };
+                refreshDerivedVitals(true);
+
+                // Fresh magic/shield state for a new hero
+                hero.shieldTurns = 0; hero.shieldReduction = 0;
+                hero.magic = { multiMissile: false, ignite: false, upgradeChoice: null, capstone: null, milestonesSeen: [] };
+                hero.luck = 10;
+                hero.tempGoldBoostTurns = 0;
+                hero.injury = null;
+                hero.bestiary = {};
+                hero.gearAffixes = { weapon: null, helmet: null, armor: null, gloves: null, pants: null, legs: null };
+
+                guild = { registered: false, xp: 0, rankIndex: 0, activeQuestId: null, completedQuestIds: [] };
+                dungeonRun = null;
+                arenaRun = null;
+                hiddenDungeonUnlocked = false;
+                travelJourney = null;
+                forcedEncounter = null;
+                currentEnv = "town";
+                openTownHub();
+            };
+        }
+        drawCreationScreen();
+    }
+
+    function renderStatPanel() {
+        return `
+            <div class="rpg-panel" style="width: 100%; max-width: 650px; padding: 12px 20px; box-sizing: border-box; display: flex; flex-wrap: wrap; gap: 15px; justify-content: space-between; font-size: 0.9rem; margin-bottom: 20px; background: linear-gradient(180deg, rgba(11, 22, 54, 0.94), rgba(5, 10, 24, 0.88));">
+                <div style="display:flex; align-items:center; gap:10px;">${spriteMarkup(hero.sprite, 44, "hero-avatar")}<b>${hero.className}</b> (Lv.${hero.level} ${hero.race})</div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <span>STR:${hero.stats.str}</span>|<span>DEX:${hero.stats.dex}</span>|<span>INT:${hero.stats.int}</span>|<span>LCK:${getLuckScore()}</span>
+                </div>
+                <div>🪙 <span style="color:#f1c40f; font-weight:bold;">${hero.gold}</span></div>
+                <div style="width:100%; display:flex; gap:12px; flex-wrap:wrap; color:#c9b37f; font-size:0.8rem; line-height:1.4;">
+                    <span>Guild: ${getGuildRankLabel()}</span>
+                    <span>Armor: ${Math.round(getArmorRating())}</span>
+                    <span>Injury: ${getInjuryLabel()}</span>
+                </div>
+                <div style="width:100%; color:#c9b37f; font-size:0.8rem; line-height:1.4;">Runes: ${runeDisplayText()}</div>
+                <div style="width:100%; color:#9fb3d7; font-size:0.78rem; line-height:1.4;">Luck boosts rare finds, elite spawns, and treasure rolls.</div>
+                <div style="width:100%; display:flex; gap:14px; margin-top:5px; font-size:0.8rem; color:#c7d5f3; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:150px;">HP: ${hero.hp}/${hero.maxHp} <div class="glow-bar-bg"><div class="glow-bar-fill" style="width:${(hero.hp/hero.maxHp)*100}%; background:linear-gradient(90deg, #d32f2f, #ef5350);"></div></div></div>
+                    ${hero.maxMp > 0 ? `<div style="flex:1; min-width:150px;">MP: ${hero.mp}/${hero.maxMp} <div class="glow-bar-bg"><div class="glow-bar-fill" style="width:${(hero.mp/hero.maxMp)*100}%; background:linear-gradient(90deg, #1976d2, #42a5f5);"></div></div></div>` : ""}
+                    <div style="flex:1; min-width:150px;">STA: ${Math.max(0, Math.floor(hero.stamina))}/${hero.maxStamina} <div class="glow-bar-bg"><div class="glow-bar-fill" style="width:${(hero.stamina/hero.maxStamina)*100}%; background:linear-gradient(90deg, #f1c40f, #ffd56b);"></div></div></div>
+                    <div style="flex:1; min-width:150px;">XP: ${hero.xp}/${hero.nextXp} <div class="glow-bar-bg"><div class="glow-bar-fill" style="width:${(hero.xp/hero.nextXp)*100}%; background:linear-gradient(90deg, #fbc02d, #fff59d);"></div></div></div>
+                </div>
+            </div>
+        `;
+    }
+
+    function openTownHub() {
+        view.style.opacity = '1';
+        currentEnv = "town";
+        view.className = "env-town";
+        let plat = getPlatformStyle("town");
+        view.innerHTML = `
+            <h2 style="color: #2ecc71; margin: 0 0 5px 0; text-shadow: 0 2px 4px #000;">Town Courtyard</h2>
+            <p style="color: #aaa; font-size: 0.9rem; margin-bottom: 15px;">Safe haven zone. Form tactical provisions before deployment.</p>
+            ${renderStatPanel()}
+
+            <div style="width: 260px; height: 24px; background: ${plat.bg}; border-radius: 50%; box-shadow: 0 8px 16px rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; font-size: 2.2rem; margin-bottom: 30px; border:1px solid ${plat.border};">
+                <div style="transform: translateY(-10px);">${spriteMarkup(hero.sprite, 84, "hero-stand")}</div>
+            </div>
+
+            <div style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%; max-width: 420px; margin-bottom: 12px;">
+                <button id="btn-hunt-grass" class="rpg-btn" style="background: linear-gradient(180deg, #27ae60, #1e7e43);">🌿 Hunt: Whispering Grasslands</button>
+                <button id="btn-hunt-crypt" class="rpg-btn" style="background: linear-gradient(180deg, #8e44ad, #5b2c74);">💀 Raid: Forgotten Crypt (Bosses)</button>
+                <button id="btn-hunt-volcanic" class="rpg-btn" style="background: linear-gradient(180deg, #d35400, #8e2d10);">🌋 Traverse: Molten Peaks (Lv.4+)</button>
+                <button id="btn-hub-dungeon" class="rpg-btn" style="background: linear-gradient(180deg, #34495e, #1f2833);">🏰 Enter: Ember Dungeon (Lv.5+)</button>
+            </div>
+
+            <div style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%; max-width: 420px; margin-bottom: 12px;">
+                <button id="btn-hub-guild" class="rpg-btn" style="background:linear-gradient(180deg,#2f5f95,#172945);">🏛️ Guild Hall</button>
+                <button id="btn-hub-map" class="rpg-btn" style="background:linear-gradient(180deg,#5f7cff,#273a7d);">🗺️ World Map</button>
+                <button id="btn-hub-bestiary" class="rpg-btn" style="background:linear-gradient(180deg,#5b6d8a,#283140);">📖 Bestiary</button>
+                <button id="btn-hub-arena" class="rpg-btn" style="background:linear-gradient(180deg,#9b59b6,#5d3a7a);">⚔️ Arena Trial</button>
+            </div>
+
+            <div style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: 100%; max-width: 420px;">
+                <button id="btn-hub-shop" class="rpg-btn">🏪 Shop</button>
+                <button id="btn-hub-smith" class="rpg-btn">⚒️ Blacksmith</button>
+                <button id="btn-hub-alchemist" class="rpg-btn" style="background:linear-gradient(180deg,#1abc9c,#117a65);">⚗️ Alchemist</button>
+            </div>
+        `;
+
+        document.getElementById("btn-hunt-grass").onclick = () => beginJourney({ kind: "travel", env: "grasslands", label: "Whispering Grasslands", onArrival: () => { currentEnv = "grasslands"; enterCombatState(); } });
+        const cryptBtn = document.getElementById("btn-hunt-crypt");
+        cryptBtn.disabled = hero.level < 2;
+        cryptBtn.onclick = () => beginJourney({ kind: "travel", env: "crypt", label: "Forgotten Crypt", onArrival: () => { currentEnv = "crypt"; enterCombatState(); } });
+
+        const volcanicBtn = document.getElementById("btn-hunt-volcanic");
+        volcanicBtn.disabled = hero.level < 4;
+        volcanicBtn.onclick = () => beginJourney({ kind: "travel", env: "volcanic", label: "Molten Peaks", onArrival: () => { currentEnv = "volcanic"; enterCombatState(); } });
+
+        const dungeonBtn = document.getElementById("btn-hub-dungeon");
+        dungeonBtn.disabled = hero.level < 5;
+        dungeonBtn.onclick = () => beginJourney({ kind: "dungeon", env: "dungeon", label: "Ember Dungeon", onArrival: () => startDungeonRun() });
+
+        document.getElementById("btn-hub-guild").onclick = openGuildHallView;
+        document.getElementById("btn-hub-map").onclick = openWorldMapView;
+        document.getElementById("btn-hub-bestiary").onclick = openBestiaryView;
+        document.getElementById("btn-hub-arena").onclick = openArenaHubView;
+        document.getElementById("btn-hub-shop").onclick = openShopView;
+        document.getElementById("btn-hub-smith").onclick = openBlacksmithView;
+        document.getElementById("btn-hub-alchemist").onclick = openAlchemistView;
+    }
+
+    function startDungeonRun(label = "Ember Dungeon") {
+        dungeonRun = { stage: 0, cleared: false, title: label };
+        travelJourney = null;
+        forcedEncounter = null;
+        currentEnv = "dungeon";
+        enterCombatState();
+    }
+
+    const ARENA_STAGES = [
+        { name: "Arena Scout", hp: 34, xp: 26, gold: 22, dmg: 4, die: 6, sprite: "🥷", scale: 1.0 },
+        { name: "Arena Veteran", hp: 52, xp: 42, gold: 34, dmg: 5, die: 7, sprite: "🛡️", scale: 1.2 },
+        { name: "Arena Champion", hp: 82, xp: 68, gold: 58, dmg: 7, die: 9, sprite: "👑", scale: 1.55, boss: true }
+    ];
+
+    function startArenaRun() {
+        arenaRun = { wave: 0, cleared: false };
+        travelJourney = null;
+        forcedEncounter = null;
+        currentEnv = "arena";
+        enterCombatState();
+    }
+
+    function openArenaHubView() {
+        view.style.opacity = '1';
+        view.className = "env-town";
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:24px; width:100%; max-width:600px; text-align:center;">
+                <div class="isekai-tag">⚔️ Arena Trial</div>
+                <h1 style="color:#dbe7ff; margin:0 0 8px 0;">The Pit of Endless Steel</h1>
+                <p style="color:#9fb3d7; margin:0 0 18px 0;">Three waves. No retreat. Pure combat pressure.</p>
+                ${renderStatPanel()}
+                <div class="isekai-box" style="max-width:460px; margin:0 auto 16px auto; text-align:left;">
+                    <div class="isekai-label">Rules</div>
+                    <div class="isekai-text">Win three consecutive waves to claim arena rewards. Fleeing is disabled here.</div>
+                </div>
+                <button id="btn-arena-begin" class="rpg-btn" style="background:linear-gradient(180deg,#9b59b6,#5d3a7a);">Begin Trial</button>
+                <button id="btn-arena-leave" class="rpg-btn" style="background:linear-gradient(180deg,#666,#333); margin-left:8px;">Return to Town</button>
+            </div>
+        `;
+        document.getElementById('btn-arena-begin').onclick = () => startTransition(() => startArenaRun(), 'Entering the arena...');
+        document.getElementById('btn-arena-leave').onclick = openTownHub;
+    }
+
+    function openWorldMapView() {
+        view.style.opacity = '1';
+        view.className = "env-town";
+        const nodes = [
+            { env: 'grasslands', label: 'Whispering Grasslands', req: 1, desc: 'Farming, wolves, bandits, and low-tier elites.' },
+            { env: 'crypt', label: 'Forgotten Crypt', req: 2, desc: 'Undead bosses and dark contracts.' },
+            { env: 'volcanic', label: 'Molten Peaks', req: 4, desc: 'High-risk volcanic hunts and SS contracts.' },
+            { env: 'dungeon', label: 'Ember Dungeon', req: 5, desc: 'Locked gauntlet with a final chest.' }
+        ];
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:24px; width:100%; max-width:760px; max-height:88vh; overflow-y:auto; text-align:center;">
+                <div class="isekai-tag">🗺️ World Map</div>
+                <h1 style="color:#dbe7ff; margin:0 0 8px 0;">Known Regions</h1>
+                <p style="color:#9fb3d7; margin:0 0 18px 0;">Pick a route and keep pushing deeper into the world.</p>
+                ${renderStatPanel()}
+                <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; text-align:left;">
+                    ${nodes.map(n => `
+                        <div class="isekai-box">
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                                <div>
+                                    <div style="color:#dbe7ff; font-weight:bold;">${n.label}</div>
+                                    <div class="isekai-text">Recommended Lv.${n.req}+ • ${n.desc}</div>
+                                </div>
+                                <button class="rpg-btn btn-map-go" data-env="${n.env}" style="background:linear-gradient(180deg,#5f7cff,#273a7d);" ${hero.level < n.req ? 'disabled' : ''}>Go</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                    <div class="isekai-box" style="grid-column: 1 / -1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                            <div>
+                                <div style="color:#dbe7ff; font-weight:bold;">Hidden Vaults</div>
+                                <div class="isekai-text">${hiddenDungeonUnlocked ? 'A sealed vault has been uncovered.' : 'Rare travel events may reveal a hidden dungeon.'}</div>
+                            </div>
+                            <button id="btn-map-hidden" class="rpg-btn" style="background:linear-gradient(180deg,#8e44ad,#5b2c74);" ${!hiddenDungeonUnlocked ? 'disabled' : ''}>Enter</button>
+                        </div>
+                    </div>
+                </div>
+                <button id="btn-map-leave" class="rpg-btn" style="background:linear-gradient(180deg,#666,#333); margin-top:14px;">Return to Town</button>
+            </div>
+        `;
+        document.querySelectorAll('.btn-map-go').forEach(btn => {
+            btn.onclick = () => {
+                const env = btn.getAttribute('data-env');
+                if (env === 'grasslands') beginJourney({ kind: "travel", env: "grasslands", label: "Whispering Grasslands", onArrival: () => { currentEnv = "grasslands"; enterCombatState(); } });
+                if (env === 'crypt') beginJourney({ kind: "travel", env: "crypt", label: "Forgotten Crypt", onArrival: () => { currentEnv = "crypt"; enterCombatState(); } });
+                if (env === 'volcanic') beginJourney({ kind: "travel", env: "volcanic", label: "Molten Peaks", onArrival: () => { currentEnv = "volcanic"; enterCombatState(); } });
+                if (env === 'dungeon') beginJourney({ kind: "dungeon", env: "dungeon", label: "Ember Dungeon", onArrival: () => startDungeonRun("Ember Dungeon") });
+            };
+        });
+        const hiddenBtn = document.getElementById('btn-map-hidden');
+        if (hiddenBtn) hiddenBtn.onclick = () => beginJourney({ kind: "dungeon", env: "dungeon", label: "Ancient Vault", onArrival: () => startDungeonRun("Ancient Vault") });
+        document.getElementById('btn-map-leave').onclick = openTownHub;
+    }
+
+    function openBestiaryView() {
+        view.style.opacity = '1';
+        const entries = getBestiaryEntries();
+        view.className = "env-town";
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:24px; width:100%; max-width:760px; max-height:88vh; overflow-y:auto; text-align:center;">
+                <div class="isekai-tag">📖 Bestiary</div>
+                <h1 style="color:#dbe7ff; margin:0 0 8px 0;">Monster Records</h1>
+                <p style="color:#9fb3d7; margin:0 0 18px 0;">Every thing you meet is recorded here.</p>
+                ${renderStatPanel()}
+                <div style="display:flex; flex-direction:column; gap:10px; text-align:left; max-height:50vh; overflow-y:auto; padding-right:4px;">
+                    ${entries.length ? entries.map(e => `
+                        <div class="isekai-box">
+                            <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+                                <div>
+                                    <div style="color:#dbe7ff; font-weight:bold;">${e.name} ${e.boss ? '👑' : e.elite ? '★' : ''}</div>
+                                    <div class="isekai-text">Seen ${e.seen} • Defeated ${e.defeated}</div>
+                                    <div class="isekai-text">Type: ${e.boss ? 'Boss' : e.elite ? 'Elite' : 'Wild'} • Region: ${e.env || 'Unknown'}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('') : '<div class="isekai-box"><div class="isekai-text">No records yet. Go hunt something.</div></div>'}
+                </div>
+                <button id="btn-bestiary-leave" class="rpg-btn" style="background:linear-gradient(180deg,#666,#333); margin-top:14px;">Return to Town</button>
+            </div>
+        `;
+        document.getElementById('btn-bestiary-leave').onclick = openTownHub;
+    }
+
+    function openAlchemistView() {
+        view.style.opacity = '1';
+        const discountRate = getCharismaDiscountRate();
+        const goods = [
+            { id: "salve", name: "Cleansing Salve", cost: 42, desc: "Removes your current injury." , effect: () => { healInjury(); } },
+            { id: "luck_charm", name: "Lucky Charm", cost: 78, desc: "+2 Luck permanently.", effect: () => { hero.luck += 2; } },
+            { id: "stout_mead", name: "Stout Mead", cost: 36, desc: "Restores 40 stamina.", effect: () => { hero.stamina = Math.min(hero.maxStamina, hero.stamina + 40); } },
+            { id: "iron_tonic", name: "Iron Tonic", cost: 52, desc: "Restores 30 HP and 15 MP.", effect: () => { hero.hp = Math.min(hero.maxHp, hero.hp + 30); hero.mp = Math.min(hero.maxMp, hero.mp + 15); } }
+        ].map(item => ({ ...item, cost: Math.max(10, Math.ceil(item.cost * (1 - discountRate))) }));
+        let htmlItems = goods.map((item, idx) => `
+            <div class="isekai-box" style="text-align:left;">
+                <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+                    <div>
+                        <div style="color:#dbe7ff; font-weight:bold;">${item.name}</div>
+                        <div class="isekai-text">${item.desc}</div>
+                        <div class="isekai-text">Cost: ${item.cost} Gold</div>
+                    </div>
+                    <button id="alchemy-buy-${idx}" class="rpg-btn" style="background:linear-gradient(180deg,#1abc9c,#117a65);" ${hero.gold < item.cost ? 'disabled' : ''}>Buy</button>
+                </div>
+            </div>
+        `).join('');
+        view.className = "env-town";
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:24px; width:100%; max-width:700px; max-height:88vh; overflow-y:auto; text-align:center;">
+                <div class="isekai-tag">⚗️ Alchemist</div>
+                <h1 style="color:#dbe7ff; margin:0 0 8px 0;">Tonic and Remedies</h1>
+                <p style="color:#9fb3d7; margin:0 0 14px 0;">A place for survival tools, not comfort.</p>
+                ${renderStatPanel()}
+                <div style="display:flex; flex-direction:column; gap:8px; width:100%; max-width:520px; margin:0 auto 18px auto; max-height:48vh; overflow-y:auto; padding-right:4px;">${htmlItems}</div>
+                <button id="btn-alchemist-leave" class="rpg-btn" style="background:linear-gradient(180deg,#666,#333);">Return to Town</button>
+            </div>
+        `;
+        document.getElementById("btn-alchemist-leave").onclick = openTownHub;
+        goods.forEach((item, idx) => {
+            const btn = document.getElementById(`alchemy-buy-${idx}`);
+            if (btn) btn.onclick = () => {
+                if (hero.gold < item.cost) return;
+                hero.gold -= item.cost;
+                if (typeof item.effect === 'function') item.effect();
+                addLogMsg(`✨ ${item.name} purchased.`, "#8fd1ff");
+                openAlchemistView();
+            };
+        });
+    }
+
+    function getDungeonStageLabel() {
+        if (!dungeonRun) return "Dungeon Run";
+        return `Stage ${dungeonRun.stage + 1}/4`;
+    }
+
+    function enterNextDungeonStage() {
+        if (!dungeonRun) return;
+        dungeonRun.stage += 1;
+        enterCombatState();
+    }
+
+    function openDungeonChest() {
+        view.style.opacity = '1';
+        if (!dungeonRun) return;
+        dungeonRun.cleared = true;
+        currentEnv = "dungeon";
+        const runeId = awardRandomRuneFromChest();
+        view.className = "env-dungeon";
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:25px; width:100%; max-width:560px; text-align:center;">
+                <h1 style="color:#f1c40f; margin:0 0 8px 0;">${dungeonRun?.title || 'Dungeon'} Cleared</h1>
+                <p style="color:#ddd; margin:0 0 14px 0;">The final chest stands before you.</p>
+                <div style="font-size:4rem; margin-bottom:10px;">🧰</div>
+                <div style="color:#ccc; margin-bottom:18px;">${runeId ? `You found ${RUNE_DEFS[runeId].name}.` : "The chest is empty this time."}</div>
+                <button id="btn-dungeon-leave" class="rpg-btn" style="background:linear-gradient(180deg,#27ae60,#1e7e43);">Return to Town</button>
+            </div>
+        `;
+        document.getElementById("btn-dungeon-leave").onclick = () => {
+            dungeonRun = null;
+            travelJourney = null;
+            openTownHub();
+        };
+    }
+
+    function showFieldContinueChoice() {
+        view.style.opacity = '1';
+        view.className = `env-${currentEnv}`;
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:25px; width:100%; max-width:560px; text-align:center;">
+                <h1 style="color:#f1c40f; margin:0 0 8px 0;">Battle Won</h1>
+                <p style="color:#ddd; margin:0 0 16px 0;">Do you want to keep searching the ${getAreaTitle(currentEnv)} or head back to town?</p>
+                <div style="margin-bottom:16px;">${renderStatPanel()}</div>
+                <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; width:100%;">
+                    <button id="btn-search-again" class="rpg-btn" style="background:linear-gradient(180deg,#27ae60,#1e7e43);">Search Again (-10 STA)</button>
+                    <button id="btn-return-town" class="rpg-btn" style="background:linear-gradient(180deg,#666,#333);">Return to Town (-5 STA)</button>
+                </div>
+            </div>
+        `;
+        const resumeEnv = currentEnv;
+        document.getElementById("btn-search-again").onclick = () => startTransition(() => beginJourney({ kind: "search", env: resumeEnv, label: getAreaTitle(resumeEnv), onArrival: () => { currentEnv = resumeEnv; enterCombatState(); } }), 'Searching the area...');
+        document.getElementById("btn-return-town").onclick = () => startTransition(() => beginJourney({ kind: "travel", env: "town", label: "Town Courtyard", onArrival: openTownHub }), 'Heading back to town...');
+    }
+
+    function showDungeonAdvanceChoice() {
+        view.style.opacity = '1';
+        view.className = "env-dungeon";
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:25px; width:100%; max-width:560px; text-align:center;">
+                <h1 style="color:#f1c40f; margin:0 0 8px 0;">Dungeon Chamber Cleared</h1>
+                <p style="color:#ddd; margin:0 0 16px 0;">${dungeonRun?.title || 'The dungeon'} will not let you leave until the run is finished.</p>
+                <div style="margin-bottom:16px;">${renderStatPanel()}</div>
+                <button id="btn-dungeon-continue" class="rpg-btn" style="background:linear-gradient(180deg,#27ae60,#1e7e43);">${dungeonRun && dungeonRun.stage < DUNGEON_STAGES.length - 1 ? 'Continue Deeper' : 'Open Final Chest'}</button>
+            </div>
+        `;
+        document.getElementById("btn-dungeon-continue").onclick = () => {
+            if (dungeonRun && dungeonRun.stage < DUNGEON_STAGES.length - 1) enterNextDungeonStage();
+            else openDungeonChest();
+        };
+    }
+
+
+    function showArenaAdvanceChoice() {
+        view.style.opacity = '1';
+        view.className = "env-arena";
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:25px; width:100%; max-width:560px; text-align:center;">
+                <h1 style="color:#f1c40f; margin:0 0 8px 0;">Arena Wave Cleared</h1>
+                <p style="color:#ddd; margin:0 0 16px 0;">The next wave steps into the pit.</p>
+                <div style="margin-bottom:16px;">${renderStatPanel()}</div>
+                <button id="btn-arena-continue" class="rpg-btn" style="background:linear-gradient(180deg,#27ae60,#1e7e43);">${arenaRun && arenaRun.wave < ARENA_STAGES.length - 1 ? 'Next Wave' : 'Claim Prize'}</button>
+            </div>
+        `;
+        document.getElementById("btn-arena-continue").onclick = () => {
+            if (arenaRun && arenaRun.wave < ARENA_STAGES.length - 1) {
+                arenaRun.wave += 1;
+                enterCombatState();
+            } else {
+                openArenaRewardChest();
+            }
+        };
+    }
+
+    function openArenaRewardChest() {
+        view.style.opacity = '1';
+        view.className = "env-arena";
+        arenaRun = null;
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:25px; width:100%; max-width:560px; text-align:center;">
+                <h1 style="color:#f1c40f; margin:0 0 8px 0;">Arena Trial Complete</h1>
+                <p style="color:#ddd; margin:0 0 14px 0;">The crowd throws rewards at your feet.</p>
+                <div style="font-size:4rem; margin-bottom:10px;">🏆</div>
+                <button id="btn-arena-leave" class="rpg-btn" style="background:linear-gradient(180deg,#27ae60,#1e7e43);">Return to Town</button>
+            </div>
+        `;
+        document.getElementById('btn-arena-leave').onclick = openTownHub;
+    }
+
+    function openCampfireView() {
+        view.style.opacity = '1';
+
+        view.innerHTML = `
+            <h2 style="color: #dbe7ff; margin: 0 0 5px 0;">The Rest Campfire</h2>
+            ${renderStatPanel()}
+            <div style="background: rgba(12,24,58,0.58); padding: 20px; border-radius: 14px; text-align: center; max-width: 400px; width: 100%; margin-bottom: 20px; border: 1px solid rgba(160,185,255,0.2);">
+                <div style="font-size: 3.5rem; animation: shake 0.6s infinite alternate; display: inline-block;">🔥</div>
+                <div style="width: 140px; height: 12px; background: linear-gradient(90deg, #5f7cff, #273a7d); margin: 10px auto 0 auto; border-radius: 50%;"></div>
+            </div>
+            <div style="display: flex; gap: 15px;">
+                <button id="btn-rest-exec" class="rpg-btn" style="background: linear-gradient(180deg,#5f7cff,#273a7d);">Rest & Heal Vitals</button>
+                <button id="btn-camp-leave" class="rpg-btn" style="background: #555;">Return to Courtyard</button>
+            </div>
+        `;
+        document.getElementById("btn-camp-leave").onclick = openTownHub;
+        document.getElementById("btn-rest-exec").onclick = () => {
+            hero.hp = hero.maxHp; hero.mp = hero.maxMp; hero.stamina = hero.maxStamina;
+            alert("Vitals fully replenished by the dynamic embers!");
+            openCampfireView();
+        };
+    }
+
+    function openShopView() {
+        view.style.opacity = '1';
+        const discountRate = getCharismaDiscountRate();
+        const INVENTORY_DECK = [
+            { id: "potion_hp", name: "Health Potion", cost: 15, desc: "Restores 20 HP instantly.", inventory: true },
+            { id: "potion_mp", name: "Mana Potion", cost: 15, desc: "Restores 15 MP instantly.", inventory: true },
+            { id: "sandwich", name: "Traveler's Sandwich", cost: 22, desc: "Restores 30 stamina instantly.", inventory: false, effect: () => { hero.stamina = Math.min(hero.maxStamina, hero.stamina + 30); } },
+            { id: "book_int", name: "Tome of Insight", cost: 95, desc: "Gain +5 INT immediately.", inventory: false, effect: () => { hero.stats.int += 5; hero.maxMp += 8; hero.mp = Math.min(hero.maxMp, hero.mp + 8); } },
+            { id: "stamina_broth", name: "Stamina Broth", cost: 26, desc: "Restores 50 stamina instantly.", inventory: false, effect: () => { hero.stamina = Math.min(hero.maxStamina, hero.stamina + 50); } },
+            { id: "bandage_roll", name: "Field Bandage", cost: 24, desc: "Restores 35 HP instantly.", inventory: false, effect: () => { hero.hp = Math.min(hero.maxHp, hero.hp + 35); } },
+            { id: "lucky_token", name: "Lucky Token", cost: 120, desc: "Boosts gold rewards by 10% for your next 5 fights.", inventory: false, effect: () => { hero.tempGoldBoostTurns = Math.max(hero.tempGoldBoostTurns || 0, 5); } },
+            { id: "field_manual", name: "Arcane Primer", cost: 130, desc: "Gain +3 INT and +10 max MP immediately.", inventory: false, effect: () => { hero.stats.int += 3; hero.maxMp += 10; hero.mp = Math.min(hero.maxMp, hero.mp + 10); } },
+        ].map(item => ({ ...item, cost: Math.max(item.id === 'book_int' ? 70 : 8, Math.ceil(item.cost * (1 - discountRate))) }));
+
+        let htmlItems = INVENTORY_DECK.map((item, idx) => {
+            let isLocked = hero.gold < item.cost;
+            return `
+                <div style="background:rgba(12,24,58,0.76); border:1px solid rgba(160,185,255,0.2); border-radius:12px; padding:10px; display:flex; justify-content:space-between; align-items:center; font-size:0.85rem;">
+                    <div style="text-align:left;">
+                        <b style="color:#dbe7ff;">${item.name}</b> (${item.cost}g)<br><span style="color:#b8c7e6; font-size:0.75rem;">${item.desc}</span>
+                    </div>
+                    <button id="shop-buy-${idx}" class="rpg-btn" style="padding:4px 10px; font-size:0.8rem; background:linear-gradient(180deg,#5f7cff,#273a7d);" ${isLocked?"disabled":""}>Buy</button>
+                </div>
+            `;
+        }).join("");
+
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:24px; width:100%; max-width:720px; max-height:88vh; overflow-y:auto; text-align:center;">
+                <div class="isekai-tag">🏪 Marketplace</div>
+                <h1 style="color:#dbe7ff; margin:0 0 8px 0;">Supply Merchant</h1>
+                <p style="color:#9fb3d7; margin:0 0 14px 0;">Your charisma lowers prices and clever purchases fuel longer runs.</p>
+                ${renderStatPanel()}
+                <div style="display:flex; flex-direction:column; gap:8px; width:100%; max-width:520px; margin:0 auto 18px auto; max-height:48vh; overflow-y:auto; padding-right:4px;">${htmlItems}</div>
+                <button id="btn-shop-leave" class="rpg-btn" style="background:linear-gradient(180deg,#666,#333);">Return to Courtyard</button>
+            </div>
+        `;
+        document.getElementById("btn-shop-leave").onclick = openTownHub;
+
+        INVENTORY_DECK.forEach((item, idx) => {
+            let b = document.getElementById(`shop-buy-${idx}`);
+            if (b) b.onclick = () => {
+                if (hero.gold < item.cost) return;
+                hero.gold -= item.cost;
+                if (item.inventory) {
+                    hero.inventory.push(item.id);
+                    addLogMsg(`🧺 Bought ${item.name}.`, '#8fd1ff');
+                } else if (typeof item.effect === 'function') {
+                    item.effect();
+                    addLogMsg(`✨ ${item.name} is used immediately.`, '#8fd1ff');
+                }
+                openShopView();
+            };
+        });
+    }
+
+    function openGuildHallView() {
+        view.style.opacity = '1';
+        view.className = "env-town";
+        const activeQuest = getActiveGuildQuest();
+        const unlocked = getAvailableQuests();
+        const registered = guild.registered;
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:24px; width:100%; max-width:760px; text-align:center;">
+                <div class="isekai-tag">🏛️ Guild Hall</div>
+                <h1 style="color:#dbe7ff; margin:0 0 8px 0;">Adventurers' Guild</h1>
+                <p style="color:#9fb3d7; margin:0 0 18px 0;">Register, take contracts, and climb the guild ladder from F to SSS.</p>
+                ${!registered ? `
+                    <div class="isekai-box" style="max-width:520px; margin:0 auto 16px auto; text-align:left;">
+                        <div style="color:#dbe7ff; font-weight:bold; margin-bottom:6px;">Membership Fee: 500 Gold</div>
+                        <div class="isekai-text">Registration opens the quest board and guild rank progression.</div>
+                    </div>
+                    <button id="btn-guild-register" class="rpg-btn" style="background:linear-gradient(180deg,#5f7cff,#273a7d); ${hero.gold < 500 ? 'opacity:0.45; cursor:not-allowed;' : ''}" ${hero.gold < 500 ? 'disabled' : ''}>Register for 500 Gold</button>
+                ` : `
+                    <div class="isekai-grid">
+                        <div class="isekai-box">
+                            <div class="isekai-label">Rank</div>
+                            <div style="font-size:2rem; color:#8fd1ff; font-weight:bold; margin:4px 0 10px 0;">${getGuildRankLabel()}</div>
+                            <div class="isekai-text">Guild XP: ${guild.xp} / ${GUILD_XP_THRESHOLDS[Math.min(guild.rankIndex + 1, GUILD_XP_THRESHOLDS.length - 1)] || guild.xp}</div>
+                        </div>
+                        <div class="isekai-box">
+                            <div class="isekai-label">Active Contract</div>
+                            <div style="color:#dbe7ff; font-weight:bold; margin:4px 0 10px 0;">${activeQuest ? activeQuest.title : 'None'}</div>
+                            <div class="isekai-text">${activeQuest ? activeQuest.description : 'Accept a contract from the board.'}</div>
+                        </div>
+                    </div>
+                    <div style="text-align:left; margin-bottom:16px;">
+                        <div style="color:#dbe7ff; font-weight:bold; margin-bottom:8px;">Available Contracts</div>
+                        <div style="display:grid; grid-template-columns: repeat(1, minmax(0,1fr)); gap:10px; max-height:320px; overflow:auto; padding-right:4px;">
+                            ${unlocked.map(q => `
+                                <div class="isekai-box" style="text-align:left;">
+                                    <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+                                        <div>
+                                            <div style="color:#8fd1ff; font-weight:bold;">${q.title}</div>
+                                            <div class="isekai-text">${q.description}</div>
+                                            <div class="isekai-text" style="margin-top:6px;">Required Rank: ${GUILD_RANKS[q.rankIndex]} • Boss Chance: ${Math.round(q.bossChance * 100)}%</div>
+                                            <div class="isekai-text">Rewards: ${q.gold} Gold • ${q.heroXp} Hero XP • ${q.guildXp} Guild XP</div>
+                                        </div>
+                                        <button class="rpg-btn btn-quest-accept" data-quest-id="${q.id}" style="background:linear-gradient(180deg,#27ae60,#1e7e43); min-width:120px;" ${activeQuest?.id === q.id ? 'disabled' : ''}>${activeQuest?.id === q.id ? 'Active' : 'Accept'}</button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `}
+                <button id="btn-guild-leave" class="rpg-btn" style="background:linear-gradient(180deg,#666,#333);">Return to Town</button>
+            </div>
+        `;
+
+        if (!registered) {
+            const btn = document.getElementById('btn-guild-register');
+            if (btn) btn.onclick = () => {
+                if (hero.gold < 500) return;
+                hero.gold -= 500;
+                guild.registered = true;
+                guild.rankIndex = 0;
+                guild.xp = 0;
+                guild.activeQuestId = null;
+                openGuildHallView();
+            };
+        } else {
+            document.querySelectorAll('.btn-quest-accept').forEach(btn => {
+                btn.onclick = () => {
+                    const q = getGuildQuestById(btn.getAttribute('data-quest-id'));
+                    if (!q) return;
+                    guild.activeQuestId = q.id;
+                    openGuildHallView();
+                };
+            });
+        }
+        document.getElementById('btn-guild-leave').onclick = openTownHub;
+    }
+
+    function openBlacksmithView() {
+        view.style.opacity = '1';
+        view.className = "env-town";
+        const weaponNames = { sword: "Sword", bow: "Bow", staff: "Staff" };
+        const weaponIcons = { sword: "🗡️", bow: "🏹", staff: "🪄" };
+        const armorOrder = ["helmet", "armor", "gloves", "pants", "legs"];
+        const maxLevel = 10;
+        const discountRate = getCharismaDiscountRate();
+        let w = hero.weapon;
+        let atMax = w.level >= maxLevel;
+        let nextCost = Math.max(12, Math.ceil((15 + w.level * 12) * (1 - discountRate)));
+
+        const armorCard = (slot) => {
+            const data = ARMOR_SLOT_DATA[slot];
+            const level = getArmorLevel(slot);
+            const baseCost = 18 + level * (slot === 'armor' ? 22 : slot === 'helmet' ? 14 : slot === 'legs' ? 16 : 12);
+            const cost = Math.max(10, Math.ceil(baseCost * (1 - discountRate)));
+            const maxed = level >= 10;
+            return `
+                <div class="isekai-box" style="text-align:left;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                        <div>
+                            <div style="color:#dbe7ff; font-weight:bold;">${data.icon} ${data.label}</div>
+                            <div class="isekai-text">Level ${level} • Affix ${describeAffix(slot)}</div>
+                            <div class="isekai-text">Defense Weight ${data.weight.toFixed(1)}</div>
+                            <div class="isekai-text">Upgrade Cost: ${cost} Gold</div>
+                        </div>
+                        <button class="rpg-btn btn-armor-upgrade" data-slot="${slot}" style="background:linear-gradient(180deg,#5f7cff,#273a7d);" ${maxed || hero.gold < cost ? 'disabled' : ''}>${maxed ? 'MAX' : 'Upgrade'}</button>
+                    </div>
+                </div>
+            `;
+        };
+
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:24px; width:100%; max-width:860px; max-height:88vh; overflow-y:auto; text-align:center;">
+                <div class="isekai-tag">⚒️ Blacksmith</div>
+                <h1 style="color:#dbe7ff; margin:0 0 8px 0;">Forge and Reinforce</h1>
+                <p style="color:#9fb3d7; margin:0 0 16px 0;">Upgrade your weapon and each armor piece separately.</p>
+                ${renderStatPanel()}
+                <div class="isekai-grid">
+                    <div class="isekai-box" style="text-align:center;">
+                        <div style="font-size:3rem;">${weaponIcons[w.type]}</div>
+                        <div style="font-weight:bold; color:#dbe7ff; font-size:1.1rem; margin:5px 0;">${weaponNames[w.type]} — Level ${w.level}${atMax ? ' (MAX)' : ''}</div>
+                        <div class="isekai-text" style="margin-bottom:6px;">Affix: ${describeAffix('weapon')}</div>
+                        <div class="isekai-text" style="margin-bottom:14px;">Current bonus: +${(w.level - 1) * 3 + getWeaponAffixDamageBonus()} damage</div>
+                        <button id="btn-upgrade-weapon" class="rpg-btn" style="background:linear-gradient(180deg,#5f7cff,#273a7d);" ${atMax || hero.gold < nextCost ? 'disabled' : ''}>${atMax ? 'Fully Upgraded' : `Upgrade to Lv.${w.level + 1} (${nextCost}g)`}</button>
+                    </div>
+                    <div class="isekai-box" style="text-align:left;">
+                        <div class="isekai-label" style="margin-bottom:10px;">Armor Suites</div>
+                        <div class="isekai-text" style="margin-bottom:10px;">Armor reduces incoming damage and each slot can be pushed independently.</div>
+                        <div class="isekai-text">Total Armor Rating: ${Math.round(getArmorRating())}</div>
+                        <div class="isekai-text">Reduction: -${getArmorDamageReductionFlat()} flat / ${(getArmorDamageReductionPercent() * 100).toFixed(0)}%</div>
+                    </div>
+                </div>
+
+                <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; width:100%; margin-bottom:14px; text-align:left;">
+                    ${armorOrder.map(armorCard).join('')}
+                </div>
+
+                <div style="height:12px;"></div>
+                <button id="btn-smith-leave" class="rpg-btn" style="background:linear-gradient(180deg,#666,#333);">Return to Town</button>
+            </div>
+        `;
+        document.getElementById("btn-smith-leave").onclick = openTownHub;
+        if (!atMax) {
+            document.getElementById("btn-upgrade-weapon").onclick = () => {
+                if (hero.gold < nextCost) return;
+                hero.gold -= nextCost;
+                w.level++;
+                maybeRollGearAffix('weapon', w.level);
+                openBlacksmithView();
+            };
+        }
+        document.querySelectorAll('.btn-armor-upgrade').forEach(btn => {
+            btn.onclick = () => {
+                const slot = btn.getAttribute('data-slot');
+                const level = getArmorLevel(slot);
+                const baseCost = 18 + level * (slot === 'armor' ? 22 : slot === 'helmet' ? 14 : slot === 'legs' ? 16 : 12);
+            const cost = Math.max(10, Math.ceil(baseCost * (1 - discountRate)));
+                if (hero.gold < cost) return;
+                hero.gold -= cost;
+                hero.armorSlots[slot] = level + 1;
+                maybeRollGearAffix(slot, level + 1);
+                openBlacksmithView();
+            };
+        });
+    }
+
+    // ==========================================
+    // 3B. LEVEL-UP ALLOCATION & SPELL MILESTONES
+    // ==========================================
+    function openLevelUpAllocation(onDone) {
+        let pointsLeft = 5;
+        let bonus = { str: 0, dex: 0, int: 0, sta: 0, cha: 0 };
+
+        function draw() {
+            view.className = "env-town";
+            view.innerHTML = `
+                <div class="rpg-panel isekai-panel" style="padding:25px; width:100%; max-width:550px; text-align:center;">
+                    <h1 style="color:#f1c40f; margin:0 0 5px 0;">Level ${hero.level} Reached!</h1>
+                    <p style="color:#aaa; font-size:0.9rem; margin-bottom:15px;">Points Remaining: <span style="color:#f1c40f; font-weight:bold;">${pointsLeft}</span></p>
+                    <div style="background: rgba(12,24,58,0.58); padding: 12px; border-radius: 14px; border: 1px solid rgba(160,185,255,0.2); text-align:left;">
+                        ${["str", "dex", "int", "sta", "cha"].map(s => `
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:0.95rem;">
+                                <span style="text-transform: uppercase; font-weight:bold; color:#bbb;">${s}: <span style="color:#fff;">${hero.stats[s]}</span>${bonus[s]>0 ? ` <span style="color:#2ecc71;">(+${bonus[s]})</span>` : ""}</span>
+                                <div style="display:flex; gap:6px;">
+                                    <div class="stat-dot" data-stat="${s}" data-dir="minus">-</div>
+                                    <div class="stat-dot" data-stat="${s}" data-dir="plus">+</div>
+                                </div>
+                            </div>
+                        `).join("")}
+                    </div>
+                    <button id="btn-confirm-alloc" class="rpg-btn" style="margin-top:20px; width:100%; background: linear-gradient(180deg, #da3434, #801a1a);" ${pointsLeft>0?'disabled':''}>Confirm Allocation</button>
+                </div>
+            `;
+
+            document.querySelectorAll(".stat-dot").forEach(dot => {
+                dot.onclick = () => {
+                    let stat = dot.getAttribute("data-stat"), dir = dot.getAttribute("data-dir");
+                    if (dir === "plus" && pointsLeft > 0) { bonus[stat]++; pointsLeft--; }
+                    else if (dir === "minus" && bonus[stat] > 0) { bonus[stat]--; pointsLeft++; }
+                    draw();
+                };
+            });
+
+            document.getElementById("btn-confirm-alloc").onclick = () => {
+                if (pointsLeft > 0) return;
+                let prevInt = hero.stats.int;
+                let prevStr = hero.stats.str;
+                Object.keys(bonus).forEach(s => hero.stats[s] += bonus[s]);
+                hero.maxHp += 8 + Math.floor((hero.stats.sta - 10) / 2);
+                if (hero.maxMp > 0) hero.maxMp += 6 + Math.floor((hero.stats.int - 10) / 2);
+                refreshDerivedVitals(true);
+                hero.hp = hero.maxHp; hero.mp = hero.maxMp; hero.stamina = hero.maxStamina;
+                onDone(prevStr, hero.stats.str, prevInt, hero.stats.int);
+            };
+        }
+        draw();
+    }
+
+    function showMilestonePopup(title, text, onContinue) {
+        view.className = "env-town";
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:30px; max-width:480px; text-align:center;">
+                <h2 style="color:#f1c40f; margin:0 0 10px 0;">${title}</h2>
+                <p style="color:#ccc; margin:0 0 20px 0;">${text}</p>
+                <button id="btn-milestone-continue" class="rpg-btn" style="background:#2980b9;">Continue</button>
+            </div>
+        `;
+        document.getElementById("btn-milestone-continue").onclick = onContinue;
+    }
+
+    function showSpellUpgradeChoice(onContinue) {
+        view.className = "env-town";
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:30px; max-width:520px; text-align:center;">
+                <h2 style="color:#f1c40f; margin:0 0 10px 0;">75 Intelligence Reached!</h2>
+                <p style="color:#ccc; margin:0 0 20px 0;">Choose a spell to empower with +50% damage:</p>
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    <button id="btn-up-missile" class="rpg-btn" style="background:#8e44ad;">✨ Magic Missile +50% Damage</button>
+                    <button id="btn-up-ignite" class="rpg-btn" style="background:#e67e22;">🔥 Ignite +50% Burn Damage</button>
+                </div>
+            </div>
+        `;
+        document.getElementById("btn-up-missile").onclick = () => { hero.magic.upgradeChoice = 'missile'; onContinue(); };
+        document.getElementById("btn-up-ignite").onclick = () => { hero.magic.upgradeChoice = 'ignite'; onContinue(); };
+    }
+
+    function showCapstoneChoice(onContinue) {
+        view.className = "env-town";
+        view.innerHTML = `
+            <div class="rpg-panel isekai-panel" style="padding:30px; max-width:560px; text-align:center;">
+                <h2 style="color:#f1c40f; margin:0 0 10px 0;">100 Intelligence Reached!</h2>
+                <p style="color:#ccc; margin:0 0 20px 0;">Choose your mastery:</p>
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    <button id="btn-cap-shield" class="rpg-btn" style="background:#2980b9;">🛡️ Shield — Block 25% damage for 4 turns</button>
+                    <button id="btn-cap-polymorph" class="rpg-btn" style="background:#27ae60;">🌀 Polymorph — Turn enemy into a rabbit for 3 turns</button>
+                    <button id="btn-cap-amp" class="rpg-btn" style="background:#c0392b;">💥 +100% Magic Damage (Permanent)</button>
+                </div>
+            </div>
+        `;
+        document.getElementById("btn-cap-shield").onclick = () => { hero.magic.capstone = 'shield'; onContinue(); };
+        document.getElementById("btn-cap-polymorph").onclick = () => { hero.magic.capstone = 'polymorph'; onContinue(); };
+        document.getElementById("btn-cap-amp").onclick = () => { hero.magic.capstone = 'ampdamage'; onContinue(); };
+    }
+
+    function processStrMilestones(prevStr, newStr, onComplete) {
+        const thresholds = [25, 50, 75, 100];
+        let pending = thresholds.filter(t => prevStr < t && newStr >= t && !hero.strMilestonesSeen.includes(t));
+
+        function next() {
+            if (pending.length === 0) { onComplete(); return; }
+            let t = pending.shift();
+            hero.strMilestonesSeen.push(t);
+            if (t === 25) {
+                showMilestonePopup("💪 Raw Power!", "Your brute strength now boosts all physical damage by 5%!", next);
+            } else if (t === 50) {
+                showMilestonePopup("💥 Pulverize Unlocked!", "You can now unleash Pulverize — a devastating strike dealing 2x normal damage!", next);
+            } else if (t === 75) {
+                showMilestonePopup("🛡️ Hardened Body!", "Your physical resilience now reduces incoming damage by 20%!", next);
+            } else if (t === 100) {
+                showMilestonePopup("🔨 Pulverize Mastered!", "Pulverize now deals 3x normal damage!", next);
+            }
+        }
+        next();
+    }
+
+    function processIntMilestones(prevInt, newInt, onComplete) {
+        if (hero.classId !== 'mage') { onComplete(); return; }
+        const thresholds = [25, 50, 75, 100];
+        let pending = thresholds.filter(t => prevInt < t && newInt >= t && !hero.magic.milestonesSeen.includes(t));
+
+        function next() {
+            if (pending.length === 0) { onComplete(); return; }
+            let t = pending.shift();
+            hero.magic.milestonesSeen.push(t);
+            if (t === 25) {
+                hero.magic.multiMissile = true;
+                showMilestonePopup("✨ Arcane Mastery!", "Your Magic Missile now automatically fires a follow-up bolt!", next);
+            } else if (t === 50) {
+                hero.magic.ignite = true;
+                showMilestonePopup("🔥 Arcane Mastery!", "Your Magic Missile combo now finishes with an Ignite burn (3 ticks)!", next);
+            } else if (t === 75) {
+                showSpellUpgradeChoice(next);
+            } else if (t === 100) {
+                showCapstoneChoice(next);
+            }
+        }
+        next();
+    }
+
+    // ==========================================
+    // 4. ACTION ENCOUNTERS ENGINE (COMBAT)
+    // ==========================================
+    function enterCombatState() {
+        view.className = `env-${currentEnv}`;
+
+        const buildTravelEncounter = () => {
+            if (forcedEncounter) {
+                enemy = { ...forcedEncounter };
+                forcedEncounter = null;
+                hero.shieldTurns = 0;
+                hero.shieldReduction = 0;
+                hero.pulverizeCooldown = 0;
+                isEnemyTurn = false;
+                renderCombatInterface();
+                addLogMsg(`⚔️ Travel encounter! ${enemy.name} blocks the way.`, "#f1c40f");
+                return;
+            }
+
+            if (currentEnv === "dungeon") {
+                if (!dungeonRun) dungeonRun = { stage: 0, cleared: false };
+                const base = DUNGEON_STAGES[dungeonRun.stage];
+                const stageScale = base.scale || 1;
+                enemy = {
+                    name: base.name,
+                    hp: Math.floor(base.hp * stageScale),
+                    maxHp: Math.floor(base.hp * stageScale),
+                    sprite: base.sprite,
+                    xpReward: Math.floor(base.xp * stageScale),
+                    goldReward: Math.floor(base.gold * stageScale),
+                    baseDmg: Math.floor(base.dmg * stageScale),
+                    dieSides: Math.floor(base.die * stageScale),
+                    burn: null,
+                    polymorphTurns: 0,
+                    origSprite: null,
+                    origName: null,
+                    isBoss: !!base.boss,
+                    skills: base.boss ? ['infernoCrown', 'lavaWave', 'soulRend'] : ['sunder', 'slash'],
+                    dungeonStage: dungeonRun.stage + 1,
+                    groupSize: 1
+                };
+                if (base.boss) {
+                    enemy.name = `👑 ${base.name}`;
+                    enemy.hp = Math.floor(enemy.hp * 1.5);
+                    enemy.maxHp = enemy.hp;
+                    enemy.baseDmg = Math.floor(enemy.baseDmg * 1.5);
+                    enemy.dieSides = Math.floor(enemy.dieSides * 1.2);
+                    enemy.xpReward = Math.floor(enemy.xpReward * 1.5);
+                    enemy.goldReward = Math.floor(enemy.goldReward * 1.5);
+                }
+                hero.shieldTurns = 0;
+                hero.shieldReduction = 0;
+                hero.pulverizeCooldown = 0;
+                isEnemyTurn = false;
+                registerBestiaryEncounter(enemy, false);
+                renderCombatInterface();
+                addLogMsg(`🏰 Dungeon depth ${dungeonRun.stage + 1}/4. Clear the chamber to advance.`, "#f1c40f");
+                return;
+            }
+
+            if (currentEnv === 'arena') {
+                if (!arenaRun) arenaRun = { wave: 0, cleared: false };
+                const base = ARENA_STAGES[arenaRun.wave];
+                const waveScale = base.scale || 1;
+                enemy = {
+                    name: base.boss ? `👑 ${base.name}` : base.name,
+                    hp: Math.floor(base.hp * waveScale),
+                    maxHp: Math.floor(base.hp * waveScale),
+                    sprite: base.sprite,
+                    xpReward: Math.floor(base.xp * waveScale),
+                    goldReward: Math.floor(base.gold * waveScale),
+                    baseDmg: Math.floor(base.dmg * waveScale),
+                    dieSides: Math.floor(base.die * waveScale),
+                    burn: null,
+                    polymorphTurns: 0,
+                    origSprite: null,
+                    origName: null,
+                    isBoss: !!base.boss,
+                    isElite: false,
+                    skills: base.boss ? ['command', 'sunder', 'rage'] : [],
+                    groupSize: 1,
+                    phase: 1,
+                    phaseMarks: { 2: false, 3: false, 4: false }
+                };
+                hero.shieldTurns = 0;
+                hero.shieldReduction = 0;
+                hero.pulverizeCooldown = 0;
+                isEnemyTurn = false;
+                registerBestiaryEncounter(enemy, false);
+                renderCombatInterface();
+                addLogMsg(`⚔️ Arena trial wave ${arenaRun.wave + 1}/3 begins!`, "#f1c40f");
+                return;
+            }
+
+            let deck = MONSTERS[currentEnv];
+            let base = deck[Math.floor(Math.random() * deck.length)];
+            const activeQuest = getActiveGuildQuest();
+            const questBossChance = activeQuest && activeQuest.env === currentEnv ? activeQuest.bossChance : 0;
+            let questBoss = null;
+            if (activeQuest && activeQuest.env === currentEnv && activeQuest.targetBoss && Math.random() < questBossChance) {
+                questBoss = createQuestBoss(activeQuest.targetBoss, activeQuest);
+            }
+
+            let isBoss = false;
+            if (!questBoss) {
+                isBoss = Math.random() < getBossChanceForEnv(currentEnv);
+            }
+            const eliteMonster = (!questBoss && !isBoss && Math.random() < getEliteChance(currentEnv))
+                ? createEliteMonster(base, currentEnv)
+                : null;
+
+            if (questBoss) {
+                enemy = questBoss;
+            } else if (isBoss) {
+                enemy = createGenericBoss(base, currentEnv);
+            } else if (eliteMonster) {
+                enemy = eliteMonster;
+            } else {
+                enemy = { ...base };
+                enemy.xpReward = base.xp;
+                enemy.goldReward = base.gold;
+                enemy.baseDmg = base.dmg;
+                enemy.dieSides = base.die;
+                enemy.maxHp = base.hp;
+                enemy.isBoss = false;
+                enemy.skills = [];
+                enemy.groupSize = 1;
+            }
+            enemy.burn = null;
+            enemy.polymorphTurns = 0;
+            enemy.origSprite = null;
+            enemy.origName = null;
+            hero.shieldTurns = 0;
+            hero.shieldReduction = 0;
+            hero.pulverizeCooldown = 0;
+            isEnemyTurn = false;
+            registerBestiaryEncounter(enemy, false);
+            renderCombatInterface();
+            if (enemy.isBoss) addLogMsg(`👑 BOSS ENCOUNTER! ${enemy.name} stands before you — prepare for a real fight!`, "#f1c40f");
+        };
+
+        buildTravelEncounter();
+    }
+
+    function renderCombatInterface() {
+        view.style.opacity = '1';
+
+        if (enemy && enemy.hp <= 0) {
+            setTimeout(() => resolveMatch(true), 0);
+            return;
+        }
+
+        let plat = getPlatformStyle(currentEnv);
+
+        view.style.opacity = '1';
+
+        let spellListHtml = hero.spells.map(s => {
+            let cost = s === "Magic Missile" ? 4 : 8;
+            let icon = s === "Magic Missile" ? "✨" : "🔮";
+            return `<button class="rpg-btn btn-spell" data-name="${s}" data-cost="${cost}" ${hero.mp < cost || isEnemyTurn?'disabled':''}>${icon} ${s} (${cost}MP)</button>`;
+        }).join("");
+
+        let capstoneHtml = "";
+        if (hero.magic.capstone === 'shield') {
+            capstoneHtml = `<button id="btn-cast-shield" class="rpg-btn" style="background:linear-gradient(180deg,#2980b9,#1c5980);" ${hero.mp<8||isEnemyTurn?'disabled':''}>🛡️ Shield (8MP)</button>`;
+        } else if (hero.magic.capstone === 'polymorph') {
+            capstoneHtml = `<button id="btn-cast-polymorph" class="rpg-btn" style="background:linear-gradient(180deg,#27ae60,#1a7a41);" ${hero.mp<10||isEnemyTurn?'disabled':''}>🌀 Polymorph (10MP)</button>`;
+        }
+
+        let pulverizeHtml = "";
+        if (isPulverizeUnlocked()) {
+            let onCd = hero.pulverizeCooldown > 0;
+            pulverizeHtml = `<button id="btn-combat-pulverize" class="rpg-btn" style="background:linear-gradient(180deg,#c0392b,#7a2015);" ${isEnemyTurn||onCd||hero.stamina < 20?'disabled':''}>🔨 Pulverize${onCd?` (${hero.pulverizeCooldown})`:''}</button>`;
+        }
+
+        let hPots = hero.inventory.filter(i => i === "potion_hp").length;
+        let mPots = hero.inventory.filter(i => i === "potion_mp").length;
+        let dungeonInfoHtml = currentEnv === "dungeon" ? `<div class="rpg-panel" style="padding:10px 14px; margin-bottom:12px; text-align:center; max-width:600px; width:100%; background:rgba(12,24,58,0.72); border-color:rgba(160,185,255,0.2); color:#dbe7ff;">${dungeonRun?.title || 'Dungeon'} Depth: ${dungeonRun ? dungeonRun.stage + 1 : 1}/4</div>` : "";
+        let arenaInfoHtml = currentEnv === "arena" ? `<div class="rpg-panel" style="padding:10px 14px; margin-bottom:12px; text-align:center; max-width:600px; width:100%; background:rgba(34,15,58,0.72); border-color:rgba(180,140,255,0.25); color:#dbe7ff;">Arena Trial: ${arenaRun ? arenaRun.wave + 1 : 1}/3</div>` : "";
+
+        view.innerHTML = `
+            <div id="battle-arena" style="position:relative; display:flex; justify-content:space-between; width:100%; max-width:650px; margin-bottom:10px; align-items:flex-end; height:180px;">
+                <div style="display:flex; flex-direction:column; align-items:center; flex:1;">
+                    <div id="p-node-spr" style="transition:transform 0.15s; display:inline-block;">${spriteMarkup(hero.sprite, 92, "hero-combat")}</div>
+                    <div style="width:140px; height:18px; background:${plat.bg}; border-radius:50%; border:1px solid ${plat.border}; box-shadow:0 6px 12px rgba(0,0,0,0.5);"></div>
+                    <div style="font-size:0.9rem; font-weight:bold; margin-top:5px; text-shadow:0 2px 2px #000;">You</div>
+                    <div style="width:110px; font-size:0.75rem;">
+                        HP: ${hero.hp}/${hero.maxHp}
+                        <div class="glow-bar-bg"><div class="glow-bar-fill" style="width:${(hero.hp/hero.maxHp)*100}%; background:linear-gradient(90deg, #e53935, #ff7373);"></div></div>
+                        ${hero.maxMp > 0 ? `MP: ${hero.mp}/${hero.maxMp} <div class="glow-bar-bg"><div class="glow-bar-fill" style="width:${(hero.mp/hero.maxMp)*100}%; background:linear-gradient(90deg, #1e88e5, #64b5f6);"></div></div>` : ""}
+                        ${hero.shieldTurns > 0 ? `<div style="color:#3498db; margin-top:2px;">🛡️ Shielded (${hero.shieldTurns})</div>` : ""}
+                    </div>
+                </div>
+
+                <div style="display:flex; flex-direction:column; align-items:center; flex:1;">
+                    <div id="e-node-spr" class="${enemy.isBoss ? 'boss-sprite' : ''}" style="transition:transform 0.15s; display:inline-block;">${renderEnemyCombatHtml()}</div>
+                    <div class="${enemy.isBoss ? 'boss-platform' : ''}" style="width:140px; height:18px; background:${plat.bg}; border-radius:50%; border:1px solid ${plat.border}; box-shadow:0 6px 12px rgba(0,0,0,0.5);"></div>
+                    <div style="font-size:0.9rem; font-weight:bold; margin-top:5px; text-shadow:0 2px 2px #000; color:${enemy.isBoss ? '#f1c40f' : enemy.isElite ? '#8fd1ff' : '#ef5350'};">${enemy.name}</div>
+                    ${enemy.questBossId ? `<div style="font-size:0.75rem; color:#8fd1ff; margin-top:2px;">Guild Contract Boss</div>` : ""}
+                    ${enemy.isElite ? `<div style="font-size:0.75rem; color:#8fd1ff; margin-top:2px;">Elite Monster</div>` : ""}
+                    ${enemy.groupSize ? `<div style="font-size:0.75rem; color:#f1c40f; margin-top:2px;">Group Size: ${enemy.groupSize}</div>` : ""}
+                    <div style="width:110px; font-size:0.75rem;">
+                        HP: ${enemy.hp}/${enemy.maxHp}
+                        <div class="glow-bar-bg"><div class="glow-bar-fill" style="width:${(enemy.hp/enemy.maxHp)*100}%; background:linear-gradient(90deg, #e53935, #ff7373);"></div></div>
+                        ${enemy.burn ? `<div style="color:#e67e22; margin-top:2px;">🔥 Burning (${enemy.burn.ticksLeft})</div>` : ""}
+                    </div>
+                </div>
+            </div>
+
+            ${dungeonInfoHtml}${arenaInfoHtml}${arenaInfoHtml}${arenaInfoHtml}
+
+            <div id="c-log-box" class="rpg-panel" style="width:100%; max-width:600px; height:110px; padding:10px; overflow-y:auto; box-sizing:border-box; font-family:monospace; font-size:0.8rem; line-height:1.4; margin-bottom:15px; background:rgba(12,24,58,0.72);">
+                <div style="color:#f1c40f;">⚔️ Clash started! Area environment: ${currentEnv.toUpperCase()}</div>
+            </div>
+
+            <div id="combat-interface" class="rpg-panel" style="padding:15px; display:flex; flex-direction:column; gap:10px; width:100%; max-width:600px; background:linear-gradient(180deg, rgba(10, 22, 52, 0.9), rgba(5, 10, 28, 0.84));">
+                <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                    <button id="btn-combat-atk" class="rpg-btn" style="background:linear-gradient(180deg, #c0392b, #962d22);" ${isEnemyTurn?'disabled':''}>${getAttackLabel()}</button>
+                    ${pulverizeHtml}
+                    ${spellListHtml}
+                    ${capstoneHtml}
+                </div>
+                <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                    <button id="btn-pot-hp" class="rpg-btn" style="background:linear-gradient(180deg, #27ae60, #1e7e43);" ${hPots===0||isEnemyTurn?'disabled':''}>Heal Pot (${hPots})</button>
+                    <button id="btn-pot-mp" class="rpg-btn" style="background:linear-gradient(180deg, #2980b9, #1f618d);" ${mPots===0||isEnemyTurn?'disabled':''}>Mana Pot (${mPots})</button>
+                    <button id="btn-combat-flee" class="rpg-btn" style="background:linear-gradient(180deg, #666, #333);" ${isEnemyTurn || currentEnv === "dungeon" ? 'disabled' : ''}>🏃 Flee</button>
+                </div>
+            </div>
+        `;
+
+        document.getElementById("btn-combat-atk").onclick = executePhysicalStrike;
+        document.getElementById("btn-pot-hp").onclick = () => usePotionItem("potion_hp");
+        document.getElementById("btn-pot-mp").onclick = () => usePotionItem("potion_mp");
+        document.getElementById("btn-combat-flee").onclick = attemptFlee;
+        if (document.getElementById("btn-combat-pulverize")) document.getElementById("btn-combat-pulverize").onclick = executePulverize;
+        document.querySelectorAll(".btn-spell").forEach(b => {
+            b.onclick = () => executeSpellProcedure(b.getAttribute("data-name"), parseInt(b.getAttribute("data-cost")));
+        });
+        if (document.getElementById("btn-cast-shield")) document.getElementById("btn-cast-shield").onclick = castShield;
+        if (document.getElementById("btn-cast-polymorph")) document.getElementById("btn-cast-polymorph").onclick = castPolymorph;
+    }
+
+    function addLogMsg(txt, color = "#fff") {
+        let b = document.getElementById("c-log-box");
+        if(!b) return;
+        let d = document.createElement("div"); d.style.color = color; d.style.marginBottom = "3px"; d.innerText = txt;
+        b.appendChild(d); b.scrollTop = b.scrollHeight;
+    }
+
+    function usePotionItem(id) {
+        hero.inventory.splice(hero.inventory.indexOf(id), 1);
+        if(id === "potion_hp") {
+            hero.hp = Math.min(hero.maxHp, hero.hp + 20);
+            addLogMsg(`💖 Drank Health Potion! Restored 20 HP.`, "#2ecc71");
+        } else {
+            hero.mp = Math.min(hero.maxMp, hero.mp + 15);
+            addLogMsg(`🧪 Drank Mana Potion! Restored 15 MP.`, "#3498db");
+        }
+        renderCombatInterface();
+        executeRetaliationPass();
+    }
+
+    function executePhysicalStrike() {
+        const pNode = document.getElementById("p-node-spr"), eNode = document.getElementById("e-node-spr");
+        pNode.classList.add("anim-p-strike");
+
+        setTimeout(() => {
+            let strMod = Math.floor((hero.stats.str - 10) / 2);
+            let dieSides = (CLASSES[hero.classId] && CLASSES[hero.classId].dieSides) || 6;
+            let weaponBonus = getPhysicalWeaponBonus();
+            let rawDmg = Math.floor(Math.random() * dieSides) + 1 + strMod + weaponBonus;
+
+            let isCrit = Math.random() * 100 < getCritChance();
+            if(isCrit) { rawDmg = Math.floor(rawDmg * getCritMultiplier()); }
+
+            rawDmg = Math.floor(rawDmg * getStrDmgBonusMultiplier() * getRuneOffenseMultiplier());
+
+            applyDamageToEnemy(rawDmg);
+            maybeTriggerEnemyPhases();
+            renderCombatInterface();
+            shakeEnemy();
+            addLogMsg(`⚔️ You hit ${enemy.name} for ${rawDmg} physical damage${isCrit?' [CRITICAL]!':'.'}`, isCrit?'#f1c40f':'#2ecc71');
+
+            setTimeout(() => {
+                if(enemy.hp <= 0) resolveMatch(true);
+                else executeRetaliationPass();
+            }, 250);
+        }, 150);
+    }
+
+    function executePulverize() {
+        if (hero.pulverizeCooldown > 0 || isEnemyTurn || hero.stamina < 20) return;
+        hero.stamina = Math.max(0, hero.stamina - 20);
+        const pNode = document.getElementById("p-node-spr");
+        pNode.classList.add("anim-p-strike");
+
+        setTimeout(() => {
+            let strMod = Math.floor((hero.stats.str - 10) / 2);
+            let dieSides = (CLASSES[hero.classId] && CLASSES[hero.classId].dieSides) || 6;
+            let weaponBonus = getPhysicalWeaponBonus();
+            let base = Math.floor(Math.random() * dieSides) + 1 + strMod + weaponBonus;
+            base = Math.floor(base * getStrDmgBonusMultiplier());
+            let mult = getPulverizeMultiplier();
+            let dmg = Math.floor(base * mult * getRuneOffenseMultiplier());
+
+            applyDamageToEnemy(dmg);
+            maybeTriggerEnemyPhases();
+            hero.pulverizeCooldown = 3;
+            renderCombatInterface();
+            shakeEnemy();
+            addLogMsg(`🔨 PULVERIZE! You crush ${enemy.name} for ${dmg} damage (x${mult})!`, "#e67e22");
+
+            setTimeout(() => {
+                if(enemy.hp <= 0) resolveMatch(true);
+                else executeRetaliationPass();
+            }, 250);
+        }, 150);
+    }
+
+    function attemptFlee() {
+        if (isEnemyTurn) return;
+        if (currentEnv === "dungeon") {
+            addLogMsg("🏰 The dungeon seals the exits. You must clear all four chambers.", "#e67e22");
+            return;
+        }
+        let chance = Math.min(90, 30 + (hero.stats.dex - 10) * 2);
+        let roll = Math.random() * 100;
+
+        if (roll < chance) {
+            addLogMsg(`🏃 You successfully flee the encounter! (${Math.floor(chance)}% chance)`, "#2ecc71");
+            const ctrl = document.getElementById("combat-interface");
+            if (ctrl) {
+                ctrl.innerHTML = `<button id="btn-flee-leave" class="rpg-btn" style="margin:0 auto; display:block; background:#555;">Return to Town</button>`;
+                document.getElementById("btn-flee-leave").onclick = openTownHub;
+            }
+        } else {
+            addLogMsg(`🏃 Failed to escape! (${Math.floor(chance)}% chance)`, "#e74c3c");
+            executeRetaliationPass();
+        }
+    }
+
+    function executeSpellProcedure(name, cost) {
+        if (name === "Magic Missile") { executeMagicMissileCombo(cost); return; }
+
+        // Generic (Fireball etc.)
+        hero.mp -= cost;
+        const intMod = Math.floor((hero.stats.int - 10) / 2);
+        const magicMult = getMagicDamageMultiplier();
+
+        launchProjectile('fireball', () => {
+            let dmg = Math.floor((Math.floor(Math.random()*10) + Math.floor(Math.random()*10) + 6 + (intMod*1.5) + getMagicWeaponBonus()) * magicMult * getRuneOffenseMultiplier());
+            applyDamageToEnemy(dmg);
+            maybeTriggerEnemyPhases();
+            renderCombatInterface();
+            shakeEnemy();
+            addLogMsg(`🔮 Cast ${name}! Hit ${enemy.name} for ${dmg} magical spell damage.`, "#9b59b6");
+            setTimeout(() => {
+                if(enemy.hp <= 0) resolveMatch(true);
+                else executeRetaliationPass();
+            }, 250);
+        });
+    }
+
+    function executeMagicMissileCombo(cost) {
+        hero.mp -= cost;
+        const intMod = Math.floor((hero.stats.int - 10) / 2);
+        const magicMult = getMagicDamageMultiplier();
+        const missileMult = 1 + (hero.magic.upgradeChoice === 'missile' ? 0.5 : 0);
+        const igniteMult = 1 + (hero.magic.upgradeChoice === 'ignite' ? 0.5 : 0);
+
+        function fireBolt(isFollowup, then) {
+            launchProjectile('missile', () => {
+                let base = Math.floor(Math.random()*6) + 4 + intMod + getMagicWeaponBonus();
+                let dmg = Math.floor(base * (isFollowup ? 0.6 : 1) * missileMult * magicMult * getRuneOffenseMultiplier());
+                applyDamageToEnemy(dmg);
+                maybeTriggerEnemyPhases();
+                renderCombatInterface();
+                shakeEnemy();
+                addLogMsg(`✨ Magic Missile${isFollowup?' (follow-up)':''} hits ${enemy.name} for ${dmg} magic damage.`, "#9b59b6");
+                setTimeout(then, 250);
+            });
+        }
+
+        fireBolt(false, () => {
+            if (enemy.hp <= 0) { resolveMatch(true); return; }
+            if (hero.magic.multiMissile) {
+                fireBolt(true, () => {
+                    if (enemy.hp <= 0) { resolveMatch(true); return; }
+                    if (hero.magic.ignite) {
+                        let tickDmg = Math.max(1, Math.floor((2 + intMod*0.5) * igniteMult * magicMult));
+                        enemy.burn = { ticksLeft: 3, dmgPerTick: tickDmg };
+                        renderCombatInterface();
+                        addLogMsg(`🔥 ${enemy.name} is set ablaze! (${tickDmg} dmg x3 turns)`, "#e67e22");
+                    }
+                    executeRetaliationPass();
+                });
+            } else {
+                executeRetaliationPass();
+            }
+        });
+    }
+
+    function castShield() {
+        if (hero.mp < 8 || isEnemyTurn) return;
+        hero.mp -= 8;
+        launchProjectile('shield', () => {
+            hero.shieldTurns = 4;
+            hero.shieldReduction = 0.25;
+            addLogMsg(`🛡️ You conjure a shield! Incoming damage reduced 25% for 4 turns.`, "#3498db");
+            renderCombatInterface();
+            executeRetaliationPass();
+        });
+    }
+
+    function castPolymorph() {
+        if (hero.mp < 10 || isEnemyTurn) return;
+        hero.mp -= 10;
+        launchProjectile('polymorph', () => {
+            if (!enemy.origSprite) { enemy.origSprite = enemy.sprite; enemy.origName = enemy.name; }
+            enemy.sprite = "🐇";
+            enemy.name = `${enemy.origName} (Polymorphed)`;
+            enemy.polymorphTurns = 3;
+            addLogMsg(`🌀 ${enemy.origName} has been turned into a harmless rabbit for 3 turns!`, "#27ae60");
+            renderCombatInterface();
+            executeRetaliationPass();
+        });
+    }
+
+    function executeRetaliationPass() {
+        if(enemy.hp <= 0 || hero.hp <= 0) return;
+
+        if (hero.burnTurns > 0) {
+            const burnDmg = hero.burnDamage || 0;
+            if (burnDmg > 0) {
+                hero.hp = Math.max(0, hero.hp - burnDmg);
+                hero.burnTurns--;
+                addLogMsg(`🔥 Fire burns you for ${burnDmg} damage. (${hero.burnTurns} left)`, "#e67e22");
+                if (hero.hp <= 0) { renderCombatInterface(); setTimeout(() => resolveMatch(false), 250); return; }
+            }
+        }
+
+        if (enemy.burn && enemy.burn.ticksLeft > 0) {
+            let d = enemy.burn.dmgPerTick;
+            applyDamageToEnemy(d);
+            enemy.burn.ticksLeft--;
+            addLogMsg(`🔥 Burn sears ${enemy.origName || enemy.name} for ${d} damage. (${enemy.burn.ticksLeft} left)`, "#e67e22");
+            if (enemy.burn.ticksLeft <= 0) enemy.burn = null;
+            renderCombatInterface();
+            if (enemy.hp <= 0) { setTimeout(() => resolveMatch(true), 300); return; }
+        }
+
+        if (isGroupEncounter()) {
+            isEnemyTurn = true;
+            renderCombatInterface();
+            setTimeout(() => {
+                const members = enemy.groupMembers.filter(m => m.hp > 0);
+                let totalDamage = 0;
+                const attackNext = (idx) => {
+                    if (idx >= members.length) {
+                        if (hero.pulverizeCooldown > 0) hero.pulverizeCooldown--;
+                        if (hero.shieldTurns > 0) hero.shieldTurns--;
+                        hero.hp = Math.max(0, hero.hp - totalDamage);
+                        if (!hero.injury && totalDamage >= Math.max(14, Math.floor(hero.maxHp * 0.22))) {
+                            const injuryChance = Math.max(0.03, 0.10 - getLuckRareChanceBonus() * 0.5);
+                            if (Math.random() < injuryChance) applyInjury();
+                        }
+                        renderCombatInterface();
+                        addLogMsg(`👥 The group lands ${members.length} separate strikes for ${totalDamage} total damage.`, '#e74c3c');
+                        setTimeout(() => {
+                            if(hero.hp <= 0) resolveMatch(false);
+                            else { isEnemyTurn = false; renderCombatInterface(); }
+                        }, 250);
+                        return;
+                    }
+                    const member = members[idx];
+                    const hit = Math.floor(Math.random() * member.dieSides) + 1 + member.baseDmg;
+                    const mitigation = Math.floor((hero.stats.dex - 10) / 4);
+                    let finalOut = Math.max(1, hit - mitigation);
+                    if (getArmorDamageReductionFlat() > 0) finalOut = Math.max(1, finalOut - getArmorDamageReductionFlat());
+                    finalOut = Math.max(1, Math.floor(finalOut * (1 - getArmorDamageReductionPercent())));
+                    if (getStrDamageReduction() > 0) finalOut = Math.floor(finalOut * (1 - getStrDamageReduction()));
+                    if (getRuneDefenseReduction() > 0) finalOut = Math.floor(finalOut * (1 - getRuneDefenseReduction()));
+                    if (hero.shieldTurns > 0) {
+                        finalOut = Math.floor(finalOut * (1 - hero.shieldReduction));
+                    }
+                    totalDamage += Math.max(0, finalOut);
+                    addLogMsg(`👥 ${member.name} strikes for ${finalOut} damage.`, '#e74c3c');
+                    setTimeout(() => attackNext(idx + 1), 120);
+                };
+                attackNext(0);
+            }, 400);
+            return;
+        }
+
+        isEnemyTurn = true;
+        renderCombatInterface();
+
+        setTimeout(() => {
+            const eNode = document.getElementById("e-node-spr"), pNode = document.getElementById("p-node-spr");
+            if(eNode) eNode.classList.add("anim-e-strike");
+
+            setTimeout(() => {
+                let polymorphed = enemy.polymorphTurns > 0;
+                let rolled = Math.floor(Math.random() * enemy.dieSides) + 1 + enemy.baseDmg;
+                if (polymorphed) rolled = Math.max(1, Math.floor(rolled * 0.1));
+
+                let mitigation = Math.floor((hero.stats.dex - 10) / 4);
+                let finalOut = Math.max(polymorphed ? 0 : 1, rolled - mitigation);
+
+                if ((enemy.isBoss || enemy.isElite) && Array.isArray(enemy.skills) && enemy.skills.length > 0 && Math.random() < (enemy.isBoss ? 0.68 : 0.42)) {
+                    const skill = enemy.skills[Math.floor(Math.random() * enemy.skills.length)];
+                    let extra = 0;
+                    let bossMsg = createBossSkillLog(skill);
+                    switch (skill) {
+                        case 'drain':
+                            extra = 3 + Math.floor(enemy.baseDmg * 0.45);
+                            enemy.hp = Math.min(enemy.maxHp, enemy.hp + Math.floor(extra * 0.5));
+                            bossMsg = `channels a life drain and siphons your strength`;
+                            break;
+                        case 'curse':
+                            extra = 4;
+                            hero.mp = Math.max(0, hero.mp - 3);
+                            bossMsg = `casts a curse that tears at your resolve`;
+                            break;
+                        case 'sunder':
+                            extra = 6;
+                            bossMsg = `smashes through your guard with a crushing blow`;
+                            break;
+                        case 'command':
+                            extra = 4;
+                            bossMsg = `roars a battlefield command and presses the attack`;
+                            break;
+                        case 'ambush':
+                            extra = 5;
+                            bossMsg = `repositions in a blur and strikes from the side`;
+                            break;
+                        case 'magmaBurst':
+                            extra = 8;
+                            hero.burnTurns = 2;
+                            hero.burnDamage = Math.max(hero.burnDamage || 0, 4);
+                            bossMsg = `erupts in a magma burst and sets you ablaze`;
+                            break;
+                        case 'emberNova':
+                            extra = 7;
+                            hero.burnTurns = 2;
+                            hero.burnDamage = Math.max(hero.burnDamage || 0, 3);
+                            bossMsg = `unleashes an ember nova across the arena`;
+                            break;
+                        case 'lavaWave':
+                            extra = 9;
+                            hero.burnTurns = 3;
+                            hero.burnDamage = Math.max(hero.burnDamage || 0, 4);
+                            bossMsg = `sends a lava wave crashing over you`;
+                            break;
+                        case 'quake':
+                            extra = 8;
+                            bossMsg = `shakes the ground with a volcanic quake`;
+                            break;
+                        case 'infernoCrown':
+                            extra = 12;
+                            hero.burnTurns = 3;
+                            hero.burnDamage = Math.max(hero.burnDamage || 0, 5);
+                            bossMsg = `calls down an inferno crown of fire`;
+                            break;
+                        case 'soulRend':
+                            extra = 10;
+                            hero.mp = Math.max(0, hero.mp - 5);
+                            bossMsg = `rips at your spirit with a dark spell`;
+                            break;
+                        default:
+                            extra = 4;
+                    }
+                    finalOut += extra;
+                    addLogMsg(`👑 ${enemy.name} ${bossMsg}!`, "#f39c12");
+                }
+
+                if (getArmorDamageReductionFlat() > 0) {
+                    finalOut = Math.max(1, finalOut - getArmorDamageReductionFlat());
+                }
+                finalOut = Math.max(1, Math.floor(finalOut * (1 - getArmorDamageReductionPercent())));
+
+                if (getStrDamageReduction() > 0) {
+                    finalOut = Math.floor(finalOut * (1 - getStrDamageReduction()));
+                }
+                if (getRuneDefenseReduction() > 0) {
+                    finalOut = Math.floor(finalOut * (1 - getRuneDefenseReduction()));
+                }
+
+                let shieldedNote = "";
+                if (hero.shieldTurns > 0) {
+                    finalOut = Math.floor(finalOut * (1 - hero.shieldReduction));
+                    hero.shieldTurns--;
+                    shieldedNote = " (Shielded)";
+                }
+
+                hero.hp = Math.max(0, hero.hp - finalOut);
+                if (!hero.injury && finalOut >= Math.max(12, Math.floor(hero.maxHp * 0.18))) {
+                    const injuryChance = Math.max(0.03, 0.12 - getLuckRareChanceBonus() * 0.5);
+                    if (Math.random() < injuryChance) applyInjury();
+                }
+
+                if (hero.pulverizeCooldown > 0) hero.pulverizeCooldown--;
+
+                if (enemy.polymorphTurns > 0) {
+                    enemy.polymorphTurns--;
+                    if (enemy.polymorphTurns === 0 && enemy.origSprite) {
+                        enemy.sprite = enemy.origSprite; enemy.name = enemy.origName;
+                        enemy.origSprite = null; enemy.origName = null;
+                        addLogMsg(`✨ The polymorph wears off. ${enemy.name} returns to normal!`, "#95a5a6");
+                    }
+                }
+
+                renderCombatInterface();
+                if(pNode) pNode.classList.add("anim-shake");
+                addLogMsg(`👹 ${enemy.name} attacks back, dealing ${finalOut} damage${polymorphed?' (weakened by Polymorph)':''}${shieldedNote}.`, "#e74c3c");
+
+                setTimeout(() => {
+                    const regen = getRuneManaRegenAmount();
+                    if (regen > 0 && hero.mp < hero.maxMp) {
+                        const beforeMp = hero.mp;
+                        hero.mp = Math.min(hero.maxMp, hero.mp + regen);
+                        if (hero.mp > beforeMp) {
+                            addLogMsg(`✨ Rune of Flow restores ${hero.mp - beforeMp} MP.`, "#9b59b6");
+                        }
+                    }
+                    if(hero.hp <= 0) resolveMatch(false);
+                    else { isEnemyTurn = false; renderCombatInterface(); }
+                }, 250);
+            }, 150);
+        }, 600);
+    }
+
+    function resolveMatch(won) {
+        if (won && enemy && enemy.hp > 0) return;
+
+        const ctrl = document.getElementById("combat-interface");
+        if(!ctrl) return;
+
+        if(won) {
+            registerBestiaryEncounter(enemy, true);
+            const xpGain = Math.floor(enemy.xpReward * getExpBonusMultiplier());
+            const goldGain = Math.floor(enemy.goldReward * getGoldRewardMultiplier());
+            hero.xp += xpGain;
+            hero.gold += goldGain;
+            addLogMsg(`
+🏆 Enemy Defeated! Collected ${xpGain} XP and 🪙${goldGain} Gold.`, "#f1c40f");
+            consumeTempGoldBoost();
+
+            if (completeActiveGuildQuest(enemy)) {
+                const quest = getGuildQuestById(enemy.questBossId || '');
+                if (quest) {
+                    addLogMsg(`📜 Contract reward claimed from ${quest.title}.`, '#8fd1ff');
+                }
+            }
+
+            let leveledUp = false;
+            if(hero.xp >= hero.nextXp) {
+                hero.level++;
+                hero.xp -= hero.nextXp;
+                hero.nextXp = Math.floor(hero.nextXp * 1.6);
+                leveledUp = true;
+                addLogMsg(`✨ LEVEL UP! You reached Level ${hero.level}! Allocate your new stat points.`, "#3498db");
+            }
+
+            const afterStats = (nextAction) => {
+                if (leveledUp) {
+                    openLevelUpAllocation((prevStr, newStr, prevInt, newInt) => {
+                        processStrMilestones(prevStr, newStr, () => {
+                            processIntMilestones(prevInt, newInt, nextAction);
+                        });
+                    });
+                } else {
+                    nextAction();
+                }
+            };
+
+            if (enemy.travelArrival) {
+                const resume = enemy.travelArrival;
+                enemy.travelArrival = null;
+                afterStats(resume);
+                return;
+            }
+
+            if (currentEnv === "dungeon" && dungeonRun) {
+                if (dungeonRun.stage < DUNGEON_STAGES.length - 1) {
+                    afterStats(showDungeonAdvanceChoice);
+                } else {
+                    afterStats(openDungeonChest);
+                }
+                return;
+            }
+
+            if (currentEnv === "arena" && arenaRun) {
+                if (arenaRun.wave < ARENA_STAGES.length - 1) {
+                    afterStats(showArenaAdvanceChoice);
+                } else {
+                    afterStats(openArenaRewardChest);
+                }
+                return;
+            }
+
+            afterStats(showFieldContinueChoice);
+        } else {
+            addLogMsg(`
+💀 Slain in Battle! Your journey ends on level ${hero.level}.`, "#da3434");
+            ctrl.innerHTML = `<button id="btn-battle-dead" class="rpg-btn" style="margin:0 auto; display:block; background:#e74c3c;">Create New Character</button>`;
+            document.getElementById("btn-battle-dead").onclick = openCharacterCreation;
+        }
+    }
+
+    // Launch execution pipeline mapping configuration entry point
+    openCharacterCreation();
+})();
+</script>
+</body>
+</html>
